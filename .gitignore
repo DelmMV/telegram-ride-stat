@@ -1,0 +1,7 @@
+# IntelliJ project files
+.idea
+#
+node_modules/
+.env
+# macOS
+.DS_Store
