@@ -2,10 +2,10 @@
   "name": "telegram-ride-top",
   "version": "0.0.1",
   "description": "tg bot for lamp community",
-  "main": "index.js",
+  "main": "top.js",
   "scripts": {
-    "start": "node ./src/index.js",
-    "dev": "nodemon ./src/index.js",
+    "start": "node ./top.js",
+    "dev": "nodemon ./top.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

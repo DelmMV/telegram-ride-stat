@@ -425,7 +425,7 @@ function parseDate(dateString) {
 (async () => {
 	await connectToDatabase();
 	bot.launch();
-	console.log('Bot is running');
+	console.log('Bot telegram-ride-stat is running');
 })();
 
 // Enable graceful stop
