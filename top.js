@@ -327,7 +327,7 @@ bot.command('top', async (ctx) => {
 		
 		let response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'неделю' : 'месяц'}:\n\n`;
 		topUsers.forEach((user, index) => {
-			response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
+			response += `${index + 1}. @${user.username}: ${user.distance.toFixed(2)} км\n`;
 		});
 		
 		ctx.reply(response);
