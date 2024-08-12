@@ -1,7 +1,6 @@
-const { Telegraf } = require("telegraf");
+const { Telegraf, Markup } = require("telegraf");
 const { MongoClient } = require('mongodb');
 const haversine = require('haversine-distance');
-
 require("dotenv").config();
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -20,7 +19,6 @@ const connectToDatabase = async () => {
 		const client = new MongoClient(MONGO_URL);
 		await client.connect();
 		db = client.db(DB_NAME);
-		db = client.db("geolocation_db");
 		console.log("Connected to MongoDB");
 	} catch (error) {
 		console.error("MongoDB connection error:", error);
@@ -28,19 +26,14 @@ const connectToDatabase = async () => {
 	}
 };
 
-bot.on('location', async (ctx) => {
-	const location = ctx.message.location;
-	const userId = ctx.message.from.id;
-	const username = `@${ctx.message.from.username}` || ctx.message.from.first_name;
-	const timestamp = ctx.message.date;
-	
+const processLocation = async (userId, username, timestamp, latitude, longitude) => {
 	const entry = {
 		userId,
 		username,
 		timestamp,
-		latitude: location.latitude,
-		longitude: location.longitude,
-		sessionId: null // Временное значение
+		latitude,
+		longitude,
+		sessionId: null
 	};
 	
 	const collection = db.collection('locations');
@@ -57,17 +50,22 @@ bot.on('location', async (ctx) => {
 			return; // Игнорируем перемещение
 		}
 		
-		if (distance > MAX_DISTANCE_THRESHOLD) {
-			entry.sessionId = lastEntry.sessionId + 1;
-		} else {
-			entry.sessionId = lastEntry.sessionId;
-		}
+		entry.sessionId = distance > MAX_DISTANCE_THRESHOLD ? lastEntry.sessionId + 1 : lastEntry.sessionId;
 	} else {
 		entry.sessionId = 1;
 	}
+	
 	await collection.insertOne(entry);
-});
+};
 
+bot.on('location', async (ctx) => {
+	const location = ctx.message.location;
+	const userId = ctx.message.from.id;
+	const username = `@${ctx.message.from.username}` || ctx.message.from.first_name;
+	const timestamp = ctx.message.date;
+	
+	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
+});
 
 bot.on('edited_message', async (ctx) => {
 	if (ctx.editedMessage.location) {
@@ -76,66 +74,13 @@ bot.on('edited_message', async (ctx) => {
 		const timestamp = ctx.editedMessage.edit_date;
 		const username = `@${ctx.editedMessage.from.username}` || ctx.editedMessage.from.first_name;
 		
-		const entry = {
-			userId,
-			username,
-			timestamp,
-			latitude: location.latitude,
-			longitude: location.longitude,
-			sessionId: null // Временное значение
-		};
-		
-		const collection = db.collection('locations');
-		const lastLocation = await collection.find({ userId }).sort({ timestamp: -1 }).limit(1).toArray();
-		
-		if (lastLocation.length > 0) {
-			const lastEntry = lastLocation[0];
-			const distance = haversine(
-					{ lat: lastEntry.latitude, lon: lastEntry.longitude },
-					{ lat: entry.latitude, lon: entry.longitude }
-			);
-			
-			// Фильтрация маленьких перемещений
-			if (distance < MIN_DISTANCE_THRESHOLD) {
-				return; // Игнорируем перемещение
-			}
-			
-			// Если расстояние больше определенного порога, начинаем новую сессию
-			if (distance > MAX_DISTANCE_THRESHOLD) {
-				entry.sessionId = lastEntry.sessionId + 1;
-			} else {
-				entry.sessionId = lastEntry.sessionId;
-			}
-		} else {
-			entry.sessionId = 1;
-		}
-		console.log(ctx.editedMessage.location)
-		
-		await collection.insertOne(entry);
+		await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 	}
 });
 
-async function calculateWeeklyStats(userId) {
+const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	const collection = db.collection('locations');
 	
-	// Определяем начало и конец текущей недели
-	const now = new Date();
-	const dayOfWeek = now.getDay(); // 0 = воскресенье, 1 = понедельник, ..., 6 = суббота
-	
-	// Найти дату понедельника текущей недели
-	const monday = new Date(now);
-	monday.setHours(0, 0, 0, 0); // Устанавливаем время на начало дня
-	monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Если сегодня воскресенье, отнимаем 6 дней, иначе отнимаем dayOfWeek - 1
-	
-	// Найти дату воскресенья текущей недели
-	const sunday = new Date(monday);
-	sunday.setDate(monday.getDate() + 6);
-	sunday.setHours(23, 59, 59, 999); // Устанавливаем время на конец дня
-	
-	const startTimestamp = Math.floor(monday.getTime() / 1000);
-	const endTimestamp = Math.floor(sunday.getTime() / 1000);
-	
-	// Получаем локации за текущую неделю
 	const locations = await collection.find({
 		userId,
 		timestamp: { $gte: startTimestamp, $lte: endTimestamp }
@@ -146,8 +91,6 @@ async function calculateWeeklyStats(userId) {
 	let totalDistance = 0;
 	let totalTime = 0;
 	let lastSessionId = locations[0].sessionId;
-	
-	// Создаем массив для хранения дистанций по каждому дню
 	let dailyDistances = new Array(7).fill(0);
 	
 	for (let i = 1; i < locations.length; i++) {
@@ -156,7 +99,7 @@ async function calculateWeeklyStats(userId) {
 		
 		if (curr.sessionId !== lastSessionId) {
 			lastSessionId = curr.sessionId;
-			continue; // Началась новая сессия, пропускаем
+			continue;
 		}
 		
 		const dist = haversine(
@@ -167,30 +110,38 @@ async function calculateWeeklyStats(userId) {
 		
 		const timeDiff = curr.timestamp - prev.timestamp;
 		
-		// Фильтрация: исключаем слишком большие промежутки времени, когда пользователь мог остановиться
-		if (timeDiff < 3600) {  // 3600 секунд = 1 час
+		if (timeDiff < 3600) {
 			totalTime += timeDiff;
 		}
 		
-		// Определяем день недели (0 = воскресенье, ..., 6 = суббота)
 		const dayIndex = new Date(curr.timestamp * 1000).getDay();
-		// Пересчитываем индекс для понедельника = 0, ..., воскресенья = 6
 		const adjustedIndex = (dayIndex + 6) % 7;
 		dailyDistances[adjustedIndex] += dist;
 	}
 	
-	const avgSpeed = totalTime > 0 ? (totalDistance / 1000) / (totalTime / 3600) : 0; // Средняя скорость в км/ч
-	
-	// Преобразуем дневные дистанции в километры
+	const avgSpeed = totalTime > 0 ? (totalDistance / 1000) / (totalTime / 3600) : 0;
 	dailyDistances = dailyDistances.map(dist => dist / 1000);
 	
 	return { distance: totalDistance / 1000, speed: avgSpeed, dailyDistances };
-}
+};
 
-async function calculateMonthlyStats(userId) {
-	const collection = db.collection('locations');
+const calculateWeeklyStats = async (userId) => {
+	const now = new Date();
+	const dayOfWeek = now.getDay();
+	const monday = new Date(now);
+	monday.setHours(0, 0, 0, 0);
+	monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+	const sunday = new Date(monday);
+	sunday.setDate(monday.getDate() + 6);
+	sunday.setHours(23, 59, 59, 999);
 	
-	// Определяем начало и конец текущего месяца
+	const startTimestamp = Math.floor(monday.getTime() / 1000);
+	const endTimestamp = Math.floor(sunday.getTime() / 1000);
+	
+	return calculateStats(userId, startTimestamp, endTimestamp);
+};
+
+const calculateMonthlyStats = async (userId) => {
 	const now = new Date();
 	const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 	const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
@@ -199,74 +150,10 @@ async function calculateMonthlyStats(userId) {
 	const startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
 	const endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
 	
-	// Получаем локации за текущий месяц
-	const locations = await collection.find({
-		userId,
-		timestamp: { $gte: startTimestamp, $lte: endTimestamp }
-	}).sort({ sessionId: 1, timestamp: 1 }).toArray();
-	
-	if (locations.length < 2) return { distance: 0, speed: 0, dailyDistances: [] };
-	
-	let totalDistance = 0;
-	let totalTime = 0;
-	let lastSessionId = locations[0].sessionId;
-	
-	// Создаем массив для хранения дистанций по каждому дню
-	let dailyDistances = new Array(lastDayOfMonth.getDate()).fill(0);
-	
-	for (let i = 1; i < locations.length; i++) {
-		const prev = locations[i - 1];
-		const curr = locations[i];
-		
-		if (curr.sessionId !== lastSessionId) {
-			lastSessionId = curr.sessionId;
-			continue; // Началась новая сессия, пропускаем
-		}
-		
-		const dist = haversine(
-				{ lat: prev.latitude, lon: prev.longitude },
-				{ lat: curr.latitude, lon: curr.longitude }
-		);
-		totalDistance += dist;
-		
-		const timeDiff = curr.timestamp - prev.timestamp;
-		
-		// Фильтрация: исключаем слишком большие промежутки времени, когда пользователь мог остановиться
-		if (timeDiff < 3600) {  // 3600 секунд = 1 час
-			totalTime += timeDiff;
-		}
-		
-		// Определяем день месяца
-		const date = new Date(curr.timestamp * 1000);
-		const dayOfMonth = date.getDate() - 1; // Индекс для массива начинается с 0
-		dailyDistances[dayOfMonth] += dist;
-	}
-	
-	const avgSpeed = totalTime > 0 ? (totalDistance / 1000) / (totalTime / 3600) : 0; // Средняя скорость в км/ч
-	
-	// Преобразуем дневные дистанции в километры
-	dailyDistances = dailyDistances.map(dist => dist / 1000);
-	
-	return { distance: totalDistance / 1000, speed: avgSpeed, dailyDistances };
-}
+	return calculateStats(userId, startTimestamp, endTimestamp);
+};
 
-
-bot.command('weekstats', async (ctx) => {
-	const userId = ctx.message.from.id;
-	const stats = await calculateWeeklyStats(userId);
-	
-	let response = `На этой неделе (с понедельника по воскресенье) вы проехали ${stats.distance.toFixed(2)} км со средней скоростью ${stats.speed.toFixed(2)} км/ч.\n\n`;
-	response += "Пробег по дням недели:\n";
-	
-	const daysOfWeek = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
-	
-	stats.dailyDistances.forEach((distance, index) => {
-		response += `${daysOfWeek[index]}: ${distance.toFixed(2)} км\n`;
-	});
-	
-	ctx.reply(response);
-});
-async function getTopUsers(period, limit) {
+const getTopUsers = async (period, limit) => {
 	const collection = db.collection('locations');
 	const now = new Date();
 	let startTimestamp, endTimestamp;
@@ -312,11 +199,31 @@ async function getTopUsers(period, limit) {
 	
 	userDistances.sort((a, b) => b.distance - a.distance);
 	return userDistances.slice(0, limit);
-}
+};
+
+const formatStatsResponse = (stats, period) => {
+	let response = `За ${period === 'week' ? 'эту неделю' : 'этот месяц'} вы проехали ${stats.distance.toFixed(2)} км со средней скоростью ${stats.speed.toFixed(2)} км/ч.\n\n`;
+	
+	if (stats.dailyDistances && stats.dailyDistances.length > 0) {
+		response += "Пробег по дням недели:\n";
+		const daysOfWeek = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье'];
+		stats.dailyDistances.forEach((distance, index) => {
+			response += `${daysOfWeek[index]}: ${distance.toFixed(2)} км\n`;
+		});
+	}
+	
+	return response;
+};
+
+bot.command('weekstats', async (ctx) => {
+	const userId = ctx.message.from.id;
+	const stats = await calculateWeeklyStats(userId);
+	ctx.reply(formatStatsResponse(stats, 'week'));
+});
 
 bot.command('top', async (ctx) => {
 	const [_, period, limitStr] = ctx.message.text.split(' ');
-	const limit = parseInt(limitStr, 10) || 10; // По умолчанию показываем 10 пользователей
+	const limit = parseInt(limitStr, 10) || 10;
 	
 	if (!['week', 'month'].includes(period)) {
 		return ctx.reply('Пожалуйста, укажите период: "week" для недельной статистики или "month" для месячной статистики.');
@@ -324,7 +231,9 @@ bot.command('top', async (ctx) => {
 	
 	try {
 		const topUsers = await getTopUsers(period, limit);
-		
+		if (topUsers.length === 0) {
+			return ctx.reply(`На этот ${period === 'week' ? 'неделе' : 'месяц'} пока нет данных.`);
+		}
 		let response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'неделю' : 'месяц'}:\n\n`;
 		topUsers.forEach((user, index) => {
 			response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
@@ -337,52 +246,10 @@ bot.command('top', async (ctx) => {
 	}
 });
 
-
-const calculateStatsBetweenDates = async (userId, startDate, endDate) => {
-	const collection = db.collection('locations');
-	const startTimestamp = Math.floor(startDate.getTime() / 1000);
-	const endTimestamp = Math.floor(endDate.getTime() / 1000);
-	
-	const locations = await collection.find({
-		userId,
-		timestamp: { $gte: startTimestamp, $lte: endTimestamp }
-	}).sort({ timestamp: 1 }).toArray();
-	
-	if (locations.length < 2) return { distance: 0, speed: 0 };
-	
-	let totalDistance = 0;
-	let totalTime = 0;
-	let lastSessionId = locations[0].sessionId;
-	let sessionStartTime = locations[0].timestamp;
-	
-	for (let i = 1; i < locations.length; i++) {
-		const prev = locations[i - 1];
-		const curr = locations[i];
-		
-		// Если началась новая сессия, обнуляем время начала сессии
-		if (curr.sessionId !== lastSessionId) {
-			lastSessionId = curr.sessionId;
-			sessionStartTime = curr.timestamp;
-			continue;
-		}
-		
-		const dist = haversine(
-				{ lat: prev.latitude, lon: prev.longitude },
-				{ lat: curr.latitude, lon: curr.longitude }
-		);
-		totalDistance += dist;
-		
-		// Время с момента предыдущей точки до текущей
-		const timeDiff = curr.timestamp - prev.timestamp;
-		
-		// Фильтрация: исключаем слишком большие промежутки времени, когда пользователь мог остановиться
-		if (timeDiff < 3600) {  // 3600 секунд = 1 час, этот порог можно настроить
-			totalTime += timeDiff;
-		}
-	}
-	
-	const avgSpeed = totalTime > 0 ? (totalDistance / 1000) / (totalTime / 3600) : 0; // Средняя скорость в км/ч
-	return { distance: totalDistance / 1000, speed: avgSpeed }; // Пройденное расстояние в км
+const parseDate = (dateString) => {
+	const [day, month, year] = dateString.split('.');
+	const date = new Date(year, month - 1, day);
+	return date.toString() === 'Invalid Date' ? null : date;
 };
 
 bot.command('sta', async (ctx) => {
@@ -405,10 +272,10 @@ bot.command('sta', async (ctx) => {
 		return ctx.reply('Начальная дата должна быть раньше конечной даты.');
 	}
 	
-	endDate.setHours(23, 59, 59); // Устанавливаем конец дня для конечной даты
+	endDate.setHours(23, 59, 59);
 	
 	try {
-		const stats = await calculateStatsBetweenDates(userId, startDate, endDate);
+		const stats = await calculateStats(userId, Math.floor(startDate.getTime() / 1000), Math.floor(endDate.getTime() / 1000));
 		ctx.reply(`За период с ${startDateStr} по ${endDateStr} вы проехали ${stats.distance.toFixed(2)} км со средней скоростью ${stats.speed.toFixed(2)} км/ч.`);
 	} catch (error) {
 		console.error('Ошибка при расчете статистики:', error);
@@ -416,11 +283,46 @@ bot.command('sta', async (ctx) => {
 	}
 });
 
-function parseDate(dateString) {
-	const [day, month, year] = dateString.split('.');
-	const date = new Date(year, month - 1, day);
-	return date.toString() === 'Invalid Date' ? null : date;
-}
+bot.command('start', async (ctx) => {
+	await ctx.reply(
+			'Добро пожаловать! Выберите команду:',
+			Markup.keyboard([
+				['📅 Статистика за неделю'],
+				['📊 Топ за неделю', "📊 Топ за месяц"],
+			])
+					.resize()
+					.oneTime()
+	);
+});
+
+bot.hears('📅 Статистика за неделю', async (ctx) => {
+	const userId = ctx.message.from.id;
+	const stats = await calculateWeeklyStats(userId);
+	ctx.reply(formatStatsResponse(stats, 'week'));
+});
+
+bot.hears('📊 Топ за неделю', async (ctx) => {
+	const topUsers = await getTopUsers('week', 10);
+	ctx.reply(formatTopUsersResponse(topUsers, 'неделю'));
+});
+
+bot.hears('📊 Топ за месяц', async (ctx) => {
+	const topUsers = await getTopUsers('month', 10);
+	ctx.reply(formatTopUsersResponse(topUsers, 'месяц'));
+});
+
+const formatTopUsersResponse = (topUsers, period) => {
+	if (topUsers.length === 0) {
+		return `За этот ${period} пока нет данных.`;
+	}
+	
+	let response = `🏆 Топ-10 пользователей за этот ${period}:\n\n`;
+	topUsers.forEach((user, index) => {
+		response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
+	});
+	
+	return response;
+};
 
 (async () => {
 	await connectToDatabase();
@@ -430,4 +332,4 @@ function parseDate(dateString) {
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'))
