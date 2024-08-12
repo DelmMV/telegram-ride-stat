@@ -8,7 +8,7 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const MONGO_URL = 'mongodb://localhost:27017';
 const DB_NAME = 'geolocation_db';
 
-const MIN_DISTANCE_THRESHOLD = 20; // Порог для фильтрации небольших перемещений в метрах
+const MIN_DISTANCE_THRESHOLD = 60; // Порог для фильтрации небольших перемещений в метрах
 const MAX_DISTANCE_THRESHOLD = 500; // Порог для начала новой сессии в метрах
 
 // Initialize bot and database connection
@@ -31,7 +31,7 @@ const connectToDatabase = async () => {
 bot.on('location', async (ctx) => {
 	const location = ctx.message.location;
 	const userId = ctx.message.from.id;
-	const username = ctx.message.from.username || `${ctx.message.from.first_name} ${ctx.message.from.last_name}`;
+	const username = `@${ctx.message.from.username}` || ctx.message.from.first_name;
 	const timestamp = ctx.message.date;
 	
 	const entry = {
@@ -74,7 +74,7 @@ bot.on('edited_message', async (ctx) => {
 		const location = ctx.editedMessage.location;
 		const userId = ctx.editedMessage.from.id;
 		const timestamp = ctx.editedMessage.edit_date;
-		const username = ctx.editedMessage.from.username || `${ctx.editedMessage.from.first_name} ${ctx.editedMessage.from.last_name}`;
+		const username = `@${ctx.editedMessage.from.username}` || ctx.editedMessage.from.first_name;
 		
 		const entry = {
 			userId,
@@ -327,7 +327,7 @@ bot.command('top', async (ctx) => {
 		
 		let response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'неделю' : 'месяц'}:\n\n`;
 		topUsers.forEach((user, index) => {
-			response += `${index + 1}. @${user.username}: ${user.distance.toFixed(2)} км\n`;
+			response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
 		});
 		
 		ctx.reply(response);
