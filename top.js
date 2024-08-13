@@ -4,7 +4,7 @@ const haversine = require('haversine-distance');
 require("dotenv").config();
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const MONGO_URL = 'mongodb://localhost:27017';
+const MONGO_URL = 'mongodb://192.168.0.107:27017';
 const DB_NAME = 'geolocation_db';
 
 const MIN_DISTANCE_THRESHOLD = 60; // Порог для фильтрации небольших перемещений в метрах
@@ -72,7 +72,9 @@ bot.on('edited_message', async (ctx) => {
 		const location = ctx.editedMessage.location;
 		const userId = ctx.editedMessage.from.id;
 		const timestamp = ctx.editedMessage.edit_date;
-		const username = `@${ctx.editedMessage.from.username}` || ctx.editedMessage.from.first_name;
+		const username = ctx.editedMessage.from.username
+				? `@${ctx.editedMessage.from.username}`
+				: ctx.editedMessage.from.first_name;
 		
 		await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 	}
@@ -214,6 +216,7 @@ const formatStatsResponse = (stats, period) => {
 	
 	return response;
 };
+
 
 bot.command('weekstats', async (ctx) => {
 	const userId = ctx.message.from.id;
