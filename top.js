@@ -218,10 +218,29 @@ const formatStatsResponse = (stats, period) => {
 };
 
 
+// bot.command('weekstats', async (ctx) => {
+// 	const userId = ctx.message.from.id;
+// 	const stats = await calculateWeeklyStats(userId);
+// 	ctx.reply(formatStatsResponse(stats, 'week'));
+// });
+
 bot.command('weekstats', async (ctx) => {
 	const userId = ctx.message.from.id;
 	const stats = await calculateWeeklyStats(userId);
-	ctx.reply(formatStatsResponse(stats, 'week'));
+	const formattedStats = formatStatsResponse(stats, 'week');
+	
+	try {
+		// Отправляем сообщение пользователю в личку
+		await ctx.telegram.sendMessage(userId, formattedStats);
+		
+		// Отправляем подтверждение в чат, где была вызвана команда
+		if (ctx.chat.type !== 'private') {
+			await ctx.reply('Статистика отправлена вам в личные сообщения.');
+		}
+	} catch (error) {
+		console.error('Ошибка при отправке статистики:', error);
+		await ctx.reply('Извините, не удалось отправить статистику. Пожалуйста, убедитесь, что вы начали диалог с ботом.');
+	}
 });
 
 bot.command('top', async (ctx) => {
