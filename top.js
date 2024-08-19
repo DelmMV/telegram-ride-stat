@@ -98,7 +98,6 @@ bot.on('location', async (ctx) => {
 	
 	// Добавляем или обновляем запись геолокации в списке активных
 	activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
-	console.log(`Added/Updated location message ${messageId}.`);
 	
 	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 });
@@ -119,7 +118,6 @@ bot.on('edited_message', async (ctx) => {
 			if (activeLocations.has(messageId)) {
 				// Обновляем время последнего обновления
 				activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
-				console.log(`Updated location message ${messageId}.`);
 			}
 		}
 		
