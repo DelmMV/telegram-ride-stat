@@ -26,6 +26,7 @@ const connectToDatabase = async () => {
 	}
 };
 
+
 const processLocation = async (userId, username, timestamp, latitude, longitude) => {
 	const entry = {
 		userId,
@@ -58,11 +59,46 @@ const processLocation = async (userId, username, timestamp, latitude, longitude)
 	await collection.insertOne(entry);
 };
 
+// Хранение активных геолокаций и времени последнего обновления
+const activeLocations = new Map();
+
+// Период времени без обновления до удаления геолокации
+const MAX_INACTIVITY_TIME = 15 * 60 * 1000; // 15 минут в миллисекундах
+
+// Функция для проверки и удаления неактивных геолокаций
+async function checkAndRemoveInactiveLocations() {
+	const now = Date.now();
+	
+	for (const [messageId, { chatId, lastUpdate }] of activeLocations) {
+		if (now - lastUpdate > MAX_INACTIVITY_TIME) {
+			try {
+				await bot.telegram.deleteMessage(chatId, messageId);
+				activeLocations.delete(messageId);
+				console.log(`Message ${messageId} deleted due to inactivity.`);
+			} catch (err) {
+				if (err.response?.statusCode === 400) {
+					// Сообщение может быть уже удалено пользователем
+					activeLocations.delete(messageId);
+					console.log(`Message ${messageId} was already deleted by user.`);
+				} else {
+					console.error(`Failed to delete message ${messageId}:`, err);
+				}
+			}
+		}
+	}
+}
+
 bot.on('location', async (ctx) => {
 	const location = ctx.message.location;
 	const userId = ctx.message.from.id;
 	const username = `@${ctx.message.from.username}` || ctx.message.from.first_name;
 	const timestamp = ctx.message.date;
+	
+	const { chat, message_id: messageId } = ctx.message;
+	
+	// Добавляем или обновляем запись геолокации в списке активных
+	activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
+	console.log(`Added/Updated location message ${messageId}.`);
 	
 	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 });
@@ -75,10 +111,23 @@ bot.on('edited_message', async (ctx) => {
 		const username = ctx.editedMessage.from.username
 				? `@${ctx.editedMessage.from.username}`
 				: ctx.editedMessage.from.first_name;
+		const message = ctx.editedMessage;
+		
+		if (message?.location) {
+			const { chat, message_id: messageId } = message;
+			
+			if (activeLocations.has(messageId)) {
+				// Обновляем время последнего обновления
+				activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
+				console.log(`Updated location message ${messageId}.`);
+			}
+		}
 		
 		await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 	}
 });
+
+setInterval(checkAndRemoveInactiveLocations, 10000);
 
 const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	const collection = db.collection('locations');
