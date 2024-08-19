@@ -63,7 +63,7 @@ const processLocation = async (userId, username, timestamp, latitude, longitude)
 const activeLocations = new Map();
 
 // Период времени без обновления до удаления геолокации
-const MAX_INACTIVITY_TIME = 15 * 60 * 1000; // 15 минут в миллисекундах
+const MAX_INACTIVITY_TIME = 65 * 60 * 1000;
 
 // Функция для проверки и удаления неактивных геолокаций
 async function checkAndRemoveInactiveLocations() {
@@ -125,7 +125,7 @@ bot.on('edited_message', async (ctx) => {
 	}
 });
 
-setInterval(checkAndRemoveInactiveLocations, 10000);
+setInterval(checkAndRemoveInactiveLocations, 60000);
 
 const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	const collection = db.collection('locations');
