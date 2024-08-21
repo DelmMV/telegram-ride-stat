@@ -122,6 +122,9 @@ bot.on('location', async (ctx) => {
 	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 });
 
+bot.on('message', async (ctx) =>{
+	console.log(ctx.message)
+})
 
 bot.on('edited_message', async (ctx) => {
 	if (ctx.editedMessage.location) {
