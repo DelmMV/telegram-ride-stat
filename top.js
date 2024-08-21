@@ -94,13 +94,34 @@ bot.on('location', async (ctx) => {
 	const username = `@${ctx.message.from.username}` || ctx.message.from.first_name;
 	const timestamp = ctx.message.date;
 	
-	const { chat, message_id: messageId } = ctx.message;
+	const { chat, message_id: messageId} = ctx.message;
+	const live_period = ctx.message.location.live_period;
+	
+	// Проверяем, если время действия геопозиции бесконечно
+	if (live_period === 2147483647) {
+		// Отправляем предупреждение
+		const warningMessage = await ctx.reply('Нельзя кидать геопозицию с неограниченным временем. Геолокация будет удалена через 30 секунд!', {
+			reply_to_message_id: messageId
+		});
+		// Удаляем геопозицию и предупреждение через 30 секунд
+		setTimeout(async () => {
+			try {
+				await bot.telegram.deleteMessage(chat.id, messageId);
+				await bot.telegram.deleteMessage(chat.id, warningMessage.message_id);
+			} catch (err) {
+				console.error('Ошибка при удалении сообщения:', err);
+			}
+		}, 30000);
+		
+		return; // Прекращаем дальнейшую обработку этого сообщения
+	}
 	
 	// Добавляем или обновляем запись геолокации в списке активных
 	activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
 	
 	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 });
+
 
 bot.on('edited_message', async (ctx) => {
 	if (ctx.editedMessage.location) {
