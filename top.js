@@ -8,7 +8,7 @@ const MONGO_URL = 'mongodb://192.168.0.107:27017';
 const DB_NAME = 'geolocation_db';
 
 const MIN_DISTANCE_THRESHOLD = 60; // Порог для фильтрации небольших перемещений в метрах
-const MAX_DISTANCE_THRESHOLD = 500; // Порог для начала новой сессии в метрах
+const MAX_DISTANCE_THRESHOLD = 2000; // Порог для начала новой сессии в метрах
 
 // Initialize bot and database connection
 const bot = new Telegraf(BOT_TOKEN);
@@ -121,10 +121,6 @@ bot.on('location', async (ctx) => {
 	
 	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
 });
-
-bot.on('message', async (ctx) =>{
-	console.log(ctx.message)
-})
 
 bot.on('edited_message', async (ctx) => {
 	if (ctx.editedMessage.location) {
