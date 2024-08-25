@@ -9,6 +9,7 @@ const DB_NAME = 'geolocation_db';
 
 const MIN_DISTANCE_THRESHOLD = 60; // Порог для фильтрации небольших перемещений в метрах
 const MAX_DISTANCE_THRESHOLD = 2000; // Порог для начала новой сессии в метрах
+const MAX_TIME_THRESHOLD = 2 * 60 * 60;
 
 // Initialize bot and database connection
 const bot = new Telegraf(BOT_TOKEN);
@@ -47,11 +48,18 @@ const processLocation = async (userId, username, timestamp, latitude, longitude)
 				{ lat: entry.latitude, lon: entry.longitude }
 		);
 		
+		const timeDiff = timestamp - lastEntry.timestamp;
+		
 		if (distance < MIN_DISTANCE_THRESHOLD) {
 			return; // Игнорируем перемещение
 		}
 		
-		entry.sessionId = distance > MAX_DISTANCE_THRESHOLD ? lastEntry.sessionId + 1 : lastEntry.sessionId;
+		// Новое условие: новая сессия, если прошло больше 2 часов ИЛИ расстояние больше MAX_DISTANCE_THRESHOLD
+		if (timeDiff > MAX_TIME_THRESHOLD || distance > MAX_DISTANCE_THRESHOLD) {
+			entry.sessionId = lastEntry.sessionId + 1;
+		} else {
+			entry.sessionId = lastEntry.sessionId;
+		}
 	} else {
 		entry.sessionId = 1;
 	}
