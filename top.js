@@ -99,7 +99,11 @@ async function checkAndRemoveInactiveLocations() {
 bot.on('location', async (ctx) => {
 	const location = ctx.message.location;
 	const userId = ctx.message.from.id;
-	const username = `@${ctx.message.from.username}` || ctx.message.from.first_name;
+	const username = ctx.message.from.username
+			? `@${ctx.message.from.username}`
+			: (ctx.message.from.first_name
+					? ctx.message.from.first_name
+					: ctx.message.from.last_name);
 	const timestamp = ctx.message.date;
 	
 	const { chat, message_id: messageId} = ctx.message;
@@ -137,7 +141,9 @@ bot.on('edited_message', async (ctx) => {
 		const timestamp = ctx.editedMessage.edit_date;
 		const username = ctx.editedMessage.from.username
 				? `@${ctx.editedMessage.from.username}`
-				: ctx.editedMessage.from.first_name;
+				: (ctx.editedMessage.from.first_name
+						? ctx.editedMessage.from.first_name
+						: ctx.editedMessage.from.last_name);
 		const message = ctx.editedMessage;
 		
 		if (message?.location) {
