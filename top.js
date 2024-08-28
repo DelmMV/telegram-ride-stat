@@ -1,5 +1,5 @@
 const { Telegraf, Markup } = require("telegraf");
-const { MongoClient } = require('mongodb');
+const { MongoClient, MaxKey } = require('mongodb');
 const haversine = require('haversine-distance');
 require("dotenv").config();
 
@@ -211,27 +211,28 @@ const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 const calculateWeeklyStats = async (userId) => {
 	const now = new Date();
 	const dayOfWeek = now.getDay();
-	const monday = new Date(now);
-	monday.setHours(0, 0, 0, 0);
-	monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-	const sunday = new Date(monday);
-	sunday.setDate(monday.getDate() + 6);
-	sunday.setHours(23, 59, 59, 999);
+	const lastSunday = new Date(now);
+	lastSunday.setDate(now.getDate() - dayOfWeek - 1);
+	lastSunday.setHours(23, 59, 59, 999);
+	const lastMonday = new Date(lastSunday);
+	lastMonday.setDate(lastSunday.getDate() - 6);
+	lastMonday.setHours(0, 0, 0, 0);
 	
-	const startTimestamp = Math.floor(monday.getTime() / 1000);
-	const endTimestamp = Math.floor(sunday.getTime() / 1000);
+	const startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+	const endTimestamp = Math.floor(lastSunday.getTime() / 1000);
 	
 	return calculateStats(userId, startTimestamp, endTimestamp);
 };
 
 const calculateMonthlyStats = async (userId) => {
 	const now = new Date();
-	const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-	const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-	lastDayOfMonth.setHours(23, 59, 59, 999);
+	const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+	lastDayOfLastMonth.setHours(23, 59, 59, 999);
+	const firstDayOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1);
+	firstDayOfLastMonth.setHours(0, 0, 0, 0);
 	
-	const startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
-	const endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
+	const startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+	const endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
 	
 	return calculateStats(userId, startTimestamp, endTimestamp);
 };
@@ -243,22 +244,23 @@ const getTopUsers = async (period, limit) => {
 	
 	if (period === 'week') {
 		const dayOfWeek = now.getDay();
-		const monday = new Date(now);
-		monday.setHours(0, 0, 0, 0);
-		monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-		const sunday = new Date(monday);
-		sunday.setDate(monday.getDate() + 6);
-		sunday.setHours(23, 59, 59, 999);
+		const lastSunday = new Date(now);
+		lastSunday.setDate(now.getDate() - dayOfWeek - 1);
+		lastSunday.setHours(23, 59, 59, 999);
+		const lastMonday = new Date(lastSunday);
+		lastMonday.setDate(lastSunday.getDate() - 6);
+		lastMonday.setHours(0, 0, 0, 0);
 		
-		startTimestamp = Math.floor(monday.getTime() / 1000);
-		endTimestamp = Math.floor(sunday.getTime() / 1000);
+		startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+		endTimestamp = Math.floor(lastSunday.getTime() / 1000);
 	} else if (period === 'month') {
-		const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-		const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-		lastDayOfMonth.setHours(23, 59, 59, 999);
+		const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+		lastDayOfLastMonth.setHours(23, 59, 59, 999);
+		const firstDayOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1);
+		firstDayOfLastMonth.setHours(0, 0, 0, 0);
 		
-		startTimestamp = Math.floor(firstDayOfMonth.getTime() / 1000);
-		endTimestamp = Math.floor(lastDayOfMonth.getTime() / 1000);
+		startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+		endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
 	} else {
 		throw new Error('Invalid period');
 	}
@@ -297,13 +299,6 @@ const formatStatsResponse = (stats, period) => {
 	
 	return response;
 };
-
-
-// bot.command('weekstats', async (ctx) => {
-// 	const userId = ctx.message.from.id;
-// 	const stats = await calculateWeeklyStats(userId);
-// 	ctx.reply(formatStatsResponse(stats, 'week'));
-// });
 
 bot.command('weekstats', async (ctx) => {
 	const userId = ctx.message.from.id;
@@ -391,7 +386,7 @@ bot.command('start', async (ctx) => {
 			'Добро пожаловать! Выберите команду:',
 			Markup.keyboard([
 				['📅 Статистика за неделю'],
-				['📊 Топ за неделю', "📊 Топ за месяц"],
+				['📊 Топ за прошедшую неделю', "📊 Топ за прошлый месяц"],
 			])
 					.resize()
 					.oneTime()
