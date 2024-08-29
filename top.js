@@ -332,7 +332,7 @@ bot.command('top', async (ctx) => {
 		if (topUsers.length === 0) {
 			return ctx.reply(`На этот ${period === 'week' ? 'неделе' : 'месяц'} пока нет данных.`);
 		}
-		let response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'неделю' : 'месяц'}:\n\n`;
+		let response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'прошлую неделю' : 'прошлый месяц'}:\n\n`;
 		topUsers.forEach((user, index) => {
 			response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
 		});
