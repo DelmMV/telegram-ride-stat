@@ -411,7 +411,7 @@ bot.hears('📊 Топ за прошедший месяц', async (ctx) => {
 
 const formatTopUsersResponse = (topUsers, period) => {
 	if (topUsers.length === 0) {
-		return `За этот ${period} пока нет данных.`;
+		return `За прошлый(ую) ${period} пока нет данных.`;
 	}
 	
 	let response = `🏆 Топ-10 пользователей за этот ${period}:\n\n`;
