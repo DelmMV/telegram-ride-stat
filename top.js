@@ -385,7 +385,7 @@ bot.command('start', async (ctx) => {
 	await ctx.reply(
 			'Добро пожаловать! Выберите команду:',
 			Markup.keyboard([
-				['📅 Статистика за неделю'],
+				// ['📅 Статистика за неделю'],
 				['📊 Топ за прошедшую неделю', "📊 Топ за прошедший месяц"],
 			])
 					.resize()
@@ -393,11 +393,11 @@ bot.command('start', async (ctx) => {
 	);
 });
 
-bot.hears('📅 Статистика за неделю', async (ctx) => {
-	const userId = ctx.message.from.id;
-	const stats = await calculateWeeklyStats(userId);
-	ctx.reply(formatStatsResponse(stats, 'week'));
-});
+// bot.hears('📅 Статистика за неделю', async (ctx) => {
+// 	const userId = ctx.message.from.id;
+// 	const stats = await calculateWeeklyStats(userId);
+// 	ctx.reply(formatStatsResponse(stats, 'week'));
+// });
 
 bot.hears('📊 Топ за прошедшую неделю', async (ctx) => {
 	const topUsers = await getTopUsers('week', 10);
