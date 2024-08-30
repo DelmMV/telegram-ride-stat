@@ -414,7 +414,7 @@ const formatTopUsersResponse = (topUsers, period) => {
 		return `За прошлый ${period} пока нет данных.`;
 	}
 	
-	let response = `🏆 Топ-10 пользователей за прошлую ${period}:\n\n`;
+	let response = `🏆 Топ-10 пользователей за прошедшую ${period}:\n\n`;
 	topUsers.forEach((user, index) => {
 		response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
 	});
