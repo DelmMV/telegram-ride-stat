@@ -8,10 +8,9 @@ const MONGO_URL = 'mongodb://192.168.0.107:27017';
 const DB_NAME = 'geolocation_db';
 
 const MIN_DISTANCE_THRESHOLD = 60; // Порог для фильтрации небольших перемещений в метрах
-const MAX_DISTANCE_THRESHOLD = 2000; // Порог для начала новой сессии в метрах
+const MAX_DISTANCE_THRESHOLD = 3000; // Порог для начала новой сессии в метрах
 const MAX_TIME_THRESHOLD = 2 * 60 * 60;
 
-// Initialize bot and database connection
 const bot = new Telegraf(BOT_TOKEN);
 let db;
 
@@ -209,17 +208,20 @@ const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 };
 
 const calculateWeeklyStats = async (userId) => {
-	const now = new Date();
-	const dayOfWeek = now.getDay();
-	const lastSunday = new Date(now);
-	lastSunday.setDate(now.getDate() - dayOfWeek - 1);
-	lastSunday.setHours(23, 59, 59, 999);
-	const lastMonday = new Date(lastSunday);
-	lastMonday.setDate(lastSunday.getDate() - 6);
-	lastMonday.setHours(0, 0, 0, 0);
+	let startTimestamp, endTimestamp;
+	const lastWeek = new Date();
+	lastWeek.setDate(lastWeek.getDate() - 7); // Сдвиг на неделю назад
 	
-	const startTimestamp = Math.floor(lastMonday.getTime() / 1000);
-	const endTimestamp = Math.floor(lastSunday.getTime() / 1000);
+	const dayOfWeek = lastWeek.getDay();
+	const lastMonday = new Date(lastWeek);
+	lastMonday.setHours(0, 0, 0, 0);
+	lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Понедельник прошлой недели
+	const lastSunday = new Date(lastMonday);
+	lastSunday.setDate(lastMonday.getDate() + 6);
+	lastSunday.setHours(23, 59, 59, 999); // Воскресенье прошлой недели
+	
+	startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+	endTimestamp = Math.floor(lastSunday.getTime() / 1000);
 	
 	return calculateStats(userId, startTimestamp, endTimestamp);
 };
@@ -243,13 +245,15 @@ const getTopUsers = async (period, limit) => {
 	let startTimestamp, endTimestamp;
 	
 	if (period === 'week') {
-		const dayOfWeek = now.getDay();
-		const lastSunday = new Date(now);
-		lastSunday.setDate(now.getDate() - dayOfWeek - 1);
-		lastSunday.setHours(23, 59, 59, 999);
-		const lastMonday = new Date(lastSunday);
-		lastMonday.setDate(lastSunday.getDate() - 6);
+		const lastWeek = new Date(now);
+		lastWeek.setDate(lastWeek.getDate() - 7); // Сдвиг на неделю назад
+		const dayOfWeek = lastWeek.getDay();
+		const lastMonday = new Date(lastWeek);
 		lastMonday.setHours(0, 0, 0, 0);
+		lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Понедельник прошлой недели
+		const lastSunday = new Date(lastMonday);
+		lastSunday.setDate(lastMonday.getDate() + 6);
+		lastSunday.setHours(23, 59, 59, 999); // Воскресенье прошлой недели
 		
 		startTimestamp = Math.floor(lastMonday.getTime() / 1000);
 		endTimestamp = Math.floor(lastSunday.getTime() / 1000);
@@ -269,7 +273,6 @@ const getTopUsers = async (period, limit) => {
 		{ $match: { timestamp: { $gte: startTimestamp, $lte: endTimestamp } } },
 		{ $group: { _id: "$userId", username: { $first: "$username" } } }
 	]).toArray();
-	
 	const userDistances = [];
 	for (const user of uniqueUsers) {
 		const stats = period === 'week'
