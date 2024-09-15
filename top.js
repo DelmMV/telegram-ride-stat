@@ -74,25 +74,33 @@ const MAX_INACTIVITY_TIME = 65 * 60 * 1000;
 
 // Функция для проверки и удаления неактивных геолокаций
 async function checkAndRemoveInactiveLocations() {
-	const now = Date.now();
-	
-	for (const [messageId, { chatId, lastUpdate }] of activeLocations) {
-		if (now - lastUpdate > MAX_INACTIVITY_TIME) {
-			try {
-				await bot.telegram.deleteMessage(chatId, messageId);
-				activeLocations.delete(messageId);
-				console.log(`Message ${messageId} deleted due to inactivity.`);
-			} catch (err) {
-				if (err.response?.statusCode === 400) {
-					// Сообщение может быть уже удалено пользователем
-					activeLocations.delete(messageId);
-					console.log(`Message ${messageId} was already deleted by user.`);
-				} else {
-					console.error(`Failed to delete message ${messageId}:`, err);
-				}
-			}
-		}
-	}
+    const now = Date.now();
+
+    for (const [messageId, { chatId, lastUpdate }] of activeLocations) {
+        if (now - lastUpdate > MAX_INACTIVITY_TIME) {
+            try {
+                // Проверка прав бота
+                const chatMember = await bot.telegram.getChatMember(chatId, bot.botInfo.id);
+                if (chatMember.can_delete_messages) {
+                    await bot.telegram.deleteMessage(chatId, messageId);
+                    console.log(`Message ${messageId} deleted due to inactivity.`);
+                } else {
+                    console.log(`Bot doesn't have permission to delete messages in chat ${chatId}`);
+                }
+            } catch (err) {
+                if (err.response?.description === 'Bad Request: message to delete not found') {
+                    console.log(`Message ${messageId} was already deleted.`);
+                } else if (err.response?.description === "Bad Request: message can't be deleted") {
+                    console.log(`Message ${messageId} can't be deleted (too old or not enough rights).`);
+                } else {
+                    console.error(`Error deleting message ${messageId}:`, err.message);
+                }
+            } finally {
+                // Удаляем запись из activeLocations в любом случае
+                activeLocations.delete(messageId);
+            }
+        }
+    }
 }
 
 bot.on('location', async (ctx) => {
