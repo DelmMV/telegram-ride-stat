@@ -7,7 +7,7 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const MONGO_URL = 'mongodb://192.168.0.107:27017';
 const DB_NAME = 'geolocation_db';
 
-const MIN_DISTANCE_THRESHOLD = 15; // Порог для фильтрации небольших перемещений в метрах
+const MIN_DISTANCE_THRESHOLD = 25; // Порог для фильтрации небольших перемещений в метрах
 const MAX_DISTANCE_THRESHOLD = 3000; // Порог для начала новой сессии в метрах
 const MAX_TIME_THRESHOLD = 2 * 60 * 60;
 
