@@ -1,5 +1,5 @@
 const { Telegraf, Markup } = require("telegraf");
-const { MongoClient, MaxKey } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const haversine = require('haversine-distance');
 require("dotenv").config();
 
@@ -14,6 +14,20 @@ const MAX_TIME_THRESHOLD = 2 * 60 * 60;
 const bot = new Telegraf(BOT_TOKEN);
 let db;
 
+const getUserAvatarUrl = async (ctx, userId) => {
+	try {
+		const photos = await ctx.telegram.getUserProfilePhotos(userId, 0, 1);
+		if (photos && photos.total_count > 0) {
+			const fileId = photos.photos[0][0].file_id;
+			const file = await ctx.telegram.getFile(fileId);
+			return `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+		}
+	} catch (error) {
+		console.error('Ошибка при получении аватарки пользователя:', error);
+	}
+	return null;
+};
+
 const connectToDatabase = async () => {
 	try {
 		const client = new MongoClient(MONGO_URL);
@@ -27,14 +41,15 @@ const connectToDatabase = async () => {
 };
 
 
-const processLocation = async (userId, username, timestamp, latitude, longitude) => {
+const processLocation = async (userId, username, timestamp, latitude, longitude, avatarUrl) => {
 	const entry = {
 		userId,
 		username,
 		timestamp,
 		latitude,
 		longitude,
-		sessionId: null
+		sessionId: null,
+		avatarUrl
 	};
 	
 	const collection = db.collection('locations');
@@ -116,6 +131,9 @@ bot.on('location', async (ctx) => {
 	const { chat, message_id: messageId} = ctx.message;
 	const live_period = ctx.message.location.live_period;
 	
+	// Получаем URL аватарки пользователя
+	const avatarUrl = await getUserAvatarUrl(ctx, userId);
+	
 	// Проверяем, если время действия геопозиции бесконечно
 	if (live_period === 2147483647) {
 		// Отправляем предупреждение
@@ -138,7 +156,7 @@ bot.on('location', async (ctx) => {
 	// Добавляем или обновляем запись геолокации в списке активных
 	activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
 	
-	await processLocation(userId, username, timestamp, location.latitude, location.longitude);
+	await processLocation(userId, username, timestamp, location.latitude, location.longitude, avatarUrl);
 });
 
 bot.on('edited_message', async (ctx) => {
@@ -153,6 +171,9 @@ bot.on('edited_message', async (ctx) => {
 						: ctx.editedMessage.from.last_name);
 		const message = ctx.editedMessage;
 		
+		// Получаем URL аватарки пользователя
+		const avatarUrl = await getUserAvatarUrl(ctx, userId);
+		
 		if (message?.location) {
 			const { chat, message_id: messageId } = message;
 			
@@ -162,7 +183,7 @@ bot.on('edited_message', async (ctx) => {
 			}
 		}
 		
-		await processLocation(userId, username, timestamp, location.latitude, location.longitude);
+		await processLocation(userId, username, timestamp, location.latitude, location.longitude, avatarUrl);
 	}
 });
 
