@@ -6,6 +6,7 @@ require("dotenv").config();
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const MONGO_URL = 'mongodb://192.168.0.107:27017';
 const DB_NAME = 'geolocation_db';
+const MONOPITER_CHAT_ID = -1001405911884;
 
 const MIN_DISTANCE_THRESHOLD = 25; // Порог для фильтрации небольших перемещений в метрах
 const MAX_DISTANCE_THRESHOLD = 3000; // Порог для начала новой сессии в метрах
@@ -119,72 +120,82 @@ async function checkAndRemoveInactiveLocations() {
 }
 
 bot.on('location', async (ctx) => {
-	const location = ctx.message.location;
-	const userId = ctx.message.from.id;
-	const username = ctx.message.from.username
-			? `@${ctx.message.from.username}`
-			: (ctx.message.from.first_name
-					? ctx.message.from.first_name
-					: ctx.message.from.last_name);
-	const timestamp = ctx.message.date;
-	
-	const { chat, message_id: messageId} = ctx.message;
-	const live_period = ctx.message.location.live_period;
-	
-	// Получаем URL аватарки пользователя
-	const avatarUrl = await getUserAvatarUrl(ctx, userId);
-	
-	// Проверяем, если время действия геопозиции бесконечно
-	if (live_period === 2147483647) {
-		// Отправляем предупреждение
-		const warningMessage = await ctx.reply('Нельзя кидать геопозицию с неограниченным временем. Геолокация будет удалена через 30 секунд!', {
-			reply_to_message_id: messageId
-		});
-		// Удаляем геопозицию и предупреждение через 30 секунд
-		setTimeout(async () => {
-			try {
-				await bot.telegram.deleteMessage(chat.id, messageId);
-				await bot.telegram.deleteMessage(chat.id, warningMessage.message_id);
-			} catch (err) {
-				console.error('Ошибка при удалении сообщения:', err);
-			}
-		}, 30000);
-		
-		return; // Прекращаем дальнейшую обработку этого сообщения
-	}
-	
-	// Добавляем или обновляем запись геолокации в списке активных
-	activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
-	
-	await processLocation(userId, username, timestamp, location.latitude, location.longitude, avatarUrl);
+    const location = ctx.message.location;
+    const userId = ctx.message.from.id;
+    const username = ctx.message.from.username
+        ? `@${ctx.message.from.username}`
+        : (ctx.message.from.first_name
+            ? ctx.message.from.first_name
+            : ctx.message.from.last_name);
+    const timestamp = ctx.message.date;
+
+    const { chat, message_id: messageId } = ctx.message;
+    const live_period = ctx.message.location.live_period;
+
+    // Проверка, что данные берутся только из чата -1001405911884
+    if (chat.id !== MONOPITER_CHAT_ID) {
+        return;
+    }
+
+    // Получаем URL аватарки пользователя
+    const avatarUrl = await getUserAvatarUrl(ctx, userId);
+
+    // Проверяем, если время действия геопозиции бесконечно
+    if (live_period === 2147483647) {
+        // Отправляем предупреждение
+        const warningMessage = await ctx.reply('Нельзя кидать геопозицию с неограниченным временем. Геолокация будет удалена через 30 секунд!', {
+            reply_to_message_id: messageId
+        });
+        // Удаляем геопозицию и предупреждение через 30 секунд
+        setTimeout(async () => {
+            try {
+                await bot.telegram.deleteMessage(chat.id, messageId);
+                await bot.telegram.deleteMessage(chat.id, warningMessage.message_id);
+            } catch (err) {
+                console.error('Ошибка при удалении сообщения:', err);
+            }
+        }, 30000);
+
+        return; // Прекращаем дальнейшую обработку этого сообщения
+    }
+
+    // Добавляем или обновляем запись геолокации в списке активных
+    activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
+
+    await processLocation(userId, username, timestamp, location.latitude, location.longitude, avatarUrl);
 });
 
 bot.on('edited_message', async (ctx) => {
-	if (ctx.editedMessage.location) {
-		const location = ctx.editedMessage.location;
-		const userId = ctx.editedMessage.from.id;
-		const timestamp = ctx.editedMessage.edit_date;
-		const username = ctx.editedMessage.from.username
-				? `@${ctx.editedMessage.from.username}`
-				: (ctx.editedMessage.from.first_name
-						? ctx.editedMessage.from.first_name
-						: ctx.editedMessage.from.last_name);
-		const message = ctx.editedMessage;
-		
-		// Получаем URL аватарки пользователя
-		const avatarUrl = await getUserAvatarUrl(ctx, userId);
-		
-		if (message?.location) {
-			const { chat, message_id: messageId } = message;
-			
-			if (activeLocations.has(messageId)) {
-				// Обновляем время последнего обновления
-				activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
-			}
-		}
-		
-		await processLocation(userId, username, timestamp, location.latitude, location.longitude, avatarUrl);
-	}
+    if (ctx.editedMessage.location) {
+        const location = ctx.editedMessage.location;
+        const userId = ctx.editedMessage.from.id;
+        const timestamp = ctx.editedMessage.edit_date;
+        const username = ctx.editedMessage.from.username
+            ? `@${ctx.editedMessage.from.username}`
+            : (ctx.editedMessage.from.first_name
+                ? ctx.editedMessage.from.first_name
+                : ctx.editedMessage.from.last_name);
+        const message = ctx.editedMessage;
+
+        // Проверка, что данные берутся только из чата -1001405911884
+        if (message.chat.id !== MONOPITER_CHAT_ID) {
+            return;
+        }
+
+        // Получаем URL аватарки пользователя
+        const avatarUrl = await getUserAvatarUrl(ctx, userId);
+
+        if (message?.location) {
+            const { chat, message_id: messageId } = message;
+
+            if (activeLocations.has(messageId)) {
+                // Обновляем время последнего обновления
+                activeLocations.set(messageId, { chatId: chat.id, lastUpdate: Date.now() });
+            }
+        }
+
+        await processLocation(userId, username, timestamp, location.latitude, location.longitude, avatarUrl);
+    }
 });
 
 setInterval(checkAndRemoveInactiveLocations, 60000);
