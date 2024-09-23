@@ -53,8 +53,6 @@ const processLocation = async (userId, username, timestamp, latitude, longitude,
 		avatarUrl
 	};
 	
-console.log(username)
-
 	const collection = db.collection('locations');
 	const lastLocation = await collection.find({ userId }).sort({ timestamp: -1 }).limit(1).toArray();
 	
