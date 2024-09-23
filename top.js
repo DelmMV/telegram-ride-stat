@@ -8,7 +8,7 @@ const MONGO_URL = 'mongodb://192.168.0.107:27017';
 const DB_NAME = 'geolocation_db';
 const MONOPITER_CHAT_ID = -1001405911884;
 
-const MIN_DISTANCE_THRESHOLD = 3; // Порог для фильтрации небольших перемещений в метрах
+//const MIN_DISTANCE_THRESHOLD = 3; // Порог для фильтрации небольших перемещений в метрах
 const MAX_DISTANCE_THRESHOLD = 3000; // Порог для начала новой сессии в метрах
 const MAX_TIME_THRESHOLD = 2 * 60 * 60;
 
@@ -65,9 +65,9 @@ const processLocation = async (userId, username, timestamp, latitude, longitude,
 		
 		const timeDiff = timestamp - lastEntry.timestamp;
 		
-		if (distance < MIN_DISTANCE_THRESHOLD && timeDiff < MAX_TIME_THRESHOLD) {
-			return; // Игнорируем перемещение, если оно незначительное и прошло меньше MAX_TIME_THRESHOLD
-		}
+		// if (distance < MIN_DISTANCE_THRESHOLD && timeDiff < MAX_TIME_THRESHOLD) {
+		// 	return;
+		// }
 		
 		// Новое условие: новая сессия, если прошло больше 2 часов ИЛИ расстояние больше MAX_DISTANCE_THRESHOLD
 		if (timeDiff > MAX_TIME_THRESHOLD || distance > MAX_DISTANCE_THRESHOLD) {
