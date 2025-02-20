@@ -427,7 +427,7 @@ bot.command('sta', async (ctx) => {
 bot.command('start', async (ctx) => {
 
 	if (ctx.chat.type !== 'private') {
-		Markup.removeKeyboard();
+    ctx.reply('Клавиатура скрыта', Markup.removeKeyboard());
 		return // Просто игнорируем команду в групповых чатах
 	}
 
