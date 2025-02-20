@@ -425,6 +425,11 @@ bot.command('sta', async (ctx) => {
 });
 
 bot.command('start', async (ctx) => {
+	
+	if (ctx.chat.type !== 'private') {
+		return // Просто игнорируем команду в групповых чатах
+	}
+
 	await ctx.reply(
 			'Добро пожаловать! Выберите команду:',
 			Markup.keyboard([
