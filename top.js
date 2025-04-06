@@ -15,6 +15,13 @@ const MAX_TIME_THRESHOLD = 2 * 60 * 60;
 const bot = new Telegraf(BOT_TOKEN);
 let db;
 
+// Кэширование результатов
+const statsCache = {
+  week: { data: null, timestamp: 0 },
+  month: { data: null, timestamp: 0 }
+};
+const CACHE_TTL = 3600000; // 1 час в миллисекундах
+
 const getUserAvatarUrl = async (ctx, userId) => {
 	try {
 		const photos = await ctx.telegram.getUserProfilePhotos(userId, 0, 1);
@@ -41,6 +48,19 @@ const connectToDatabase = async () => {
 	}
 };
 
+// Создание индексов для оптимизации запросов
+const createRequiredIndexes = async () => {
+  try {
+    const collection = db.collection('locations');
+    await collection.createIndex({ userId: 1 });
+    await collection.createIndex({ timestamp: 1 });
+    await collection.createIndex({ userId: 1, timestamp: 1 });
+    await collection.createIndex({ sessionId: 1 });
+    console.log("Indexes created successfully");
+  } catch (error) {
+    console.error("Error creating indexes:", error);
+  }
+};
 
 const processLocation = async (userId, username, timestamp, latitude, longitude, avatarUrl) => {
 	const entry = {
@@ -200,6 +220,122 @@ bot.on('edited_message', async (ctx) => {
 
 setInterval(checkAndRemoveInactiveLocations, 60000);
 
+// Получение временных диапазонов для периодов
+const getTimestampRangeForPeriod = (period) => {
+  const now = new Date();
+  let startTimestamp, endTimestamp;
+  
+  if (period === 'week') {
+    const lastWeek = new Date(now);
+    lastWeek.setDate(lastWeek.getDate() - 7);
+    const dayOfWeek = lastWeek.getDay();
+    const lastMonday = new Date(lastWeek);
+    lastMonday.setHours(0, 0, 0, 0);
+    lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    const lastSunday = new Date(lastMonday);
+    lastSunday.setDate(lastMonday.getDate() + 6);
+    lastSunday.setHours(23, 59, 59, 999);
+    
+    startTimestamp = Math.floor(lastMonday.getTime() / 1000);
+    endTimestamp = Math.floor(lastSunday.getTime() / 1000);
+  } else if (period === 'month') {
+    const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    lastDayOfLastMonth.setHours(23, 59, 59, 999);
+    const firstDayOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1);
+    firstDayOfLastMonth.setHours(0, 0, 0, 0);
+    
+    startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
+    endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
+  }
+  
+  return { startTimestamp, endTimestamp };
+};
+
+// Оптимизированный расчет расстояния
+const calculateUserDistance = (locations) => {
+  if (locations.length < 2) return 0;
+  
+  let totalDistance = 0;
+  let lastSessionId = locations[0].sessionId;
+  
+  for (let i = 1; i < locations.length; i++) {
+    const prev = locations[i - 1];
+    const curr = locations[i];
+    
+    // Пропускаем переходы между сессиями
+    if (curr.sessionId !== lastSessionId) {
+      lastSessionId = curr.sessionId;
+      continue;
+    }
+    
+    // Проверяем, что расстояние не превышает максимальный порог
+    const dist = haversine(
+      { lat: prev.latitude, lon: prev.longitude },
+      { lat: curr.latitude, lon: curr.longitude }
+    );
+    
+    if (dist <= MAX_DISTANCE_THRESHOLD) {
+      totalDistance += dist;
+    }
+  }
+  
+  return totalDistance / 1000; // Преобразуем в километры
+};
+
+// Оптимизированная функция получения топ пользователей
+const getTopUsersOptimized = async (period, limit) => {
+  // Проверяем кэш
+  const now = Date.now();
+  if (statsCache[period].data && (now - statsCache[period].timestamp < CACHE_TTL)) {
+    return statsCache[period].data.slice(0, limit);
+  }
+
+  const collection = db.collection('locations');
+  const { startTimestamp, endTimestamp } = getTimestampRangeForPeriod(period);
+  
+  // Получаем уникальных пользователей за указанный период
+  const uniqueUsers = await collection.aggregate([
+    { $match: { timestamp: { $gte: startTimestamp, $lte: endTimestamp } } },
+    { $group: { _id: "$userId", username: { $first: "$username" } } }
+  ]).toArray();
+  
+  // Собираем все локации за указанный период для оптимизации
+  const allLocations = await collection.find({
+    timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+  }).sort({ userId: 1, sessionId: 1, timestamp: 1 }).toArray();
+  
+  // Группируем локации по пользователям
+  const userLocationsMap = {};
+  allLocations.forEach(loc => {
+    if (!userLocationsMap[loc.userId]) {
+      userLocationsMap[loc.userId] = [];
+    }
+    userLocationsMap[loc.userId].push(loc);
+  });
+  
+  // Вычисляем расстояния для каждого пользователя
+  const userStats = uniqueUsers.map(user => {
+    const userLocations = userLocationsMap[user._id] || [];
+    const distance = calculateUserDistance(userLocations);
+    return {
+      userId: user._id,
+      username: user.username,
+      distance
+    };
+  });
+  
+  // Сортируем и возвращаем результат
+  userStats.sort((a, b) => b.distance - a.distance);
+  
+  // Сохраняем в кэш
+  statsCache[period] = {
+    data: userStats,
+    timestamp: now
+  };
+  
+  return userStats.slice(0, limit);
+};
+
 const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 	const collection = db.collection('locations');
 	
@@ -279,54 +415,9 @@ const calculateMonthlyStats = async (userId) => {
 	return calculateStats(userId, startTimestamp, endTimestamp);
 };
 
+// Старая функция getTopUsers - оставлена для обратной совместимости
 const getTopUsers = async (period, limit) => {
-	const collection = db.collection('locations');
-	const now = new Date();
-	let startTimestamp, endTimestamp;
-	
-	if (period === 'week') {
-		const lastWeek = new Date(now);
-		lastWeek.setDate(lastWeek.getDate() - 7); // Сдвиг на неделю назад
-		const dayOfWeek = lastWeek.getDay();
-		const lastMonday = new Date(lastWeek);
-		lastMonday.setHours(0, 0, 0, 0);
-		lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Понедельник прошлой недели
-		const lastSunday = new Date(lastMonday);
-		lastSunday.setDate(lastMonday.getDate() + 6);
-		lastSunday.setHours(23, 59, 59, 999); // Воскресенье прошлой недели
-		
-		startTimestamp = Math.floor(lastMonday.getTime() / 1000);
-		endTimestamp = Math.floor(lastSunday.getTime() / 1000);
-	} else if (period === 'month') {
-		const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-		lastDayOfLastMonth.setHours(23, 59, 59, 999);
-		const firstDayOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1);
-		firstDayOfLastMonth.setHours(0, 0, 0, 0);
-		
-		startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
-		endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
-	} else {
-		throw new Error('Invalid period');
-	}
-	
-	const uniqueUsers = await collection.aggregate([
-		{ $match: { timestamp: { $gte: startTimestamp, $lte: endTimestamp } } },
-		{ $group: { _id: "$userId", username: { $first: "$username" } } }
-	]).toArray();
-	const userDistances = [];
-	for (const user of uniqueUsers) {
-		const stats = period === 'week'
-				? await calculateWeeklyStats(user._id)
-				: await calculateMonthlyStats(user._id);
-		userDistances.push({
-			userId: user._id,
-			username: user.username,
-			distance: stats.distance
-		});
-	}
-	
-	userDistances.sort((a, b) => b.distance - a.distance);
-	return userDistances.slice(0, limit);
+	return getTopUsersOptimized(period, limit);
 };
 
 const formatStatsResponse = (stats, period) => {
@@ -362,29 +453,42 @@ bot.command('weekstats', async (ctx) => {
 	}
 });
 
+// Обновленная команда /top с индикатором загрузки
 bot.command('top', async (ctx) => {
-	const [_, period, limitStr] = ctx.message.text.split(' ');
-	const limit = parseInt(limitStr, 10) || 10;
-	
-	if (!['week', 'month'].includes(period)) {
-		return ctx.reply('Пожалуйста, укажите период: "week" для недельной статистики или "month" для месячной статистики.');
-	}
-	
-	try {
-		const topUsers = await getTopUsers(period, limit);
-		if (topUsers.length === 0) {
-			return ctx.reply(`На этот ${period === 'week' ? 'неделе' : 'месяц'} пока нет данных.`);
-		}
-		let response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'прошлую неделю' : 'прошлый месяц'}:\n\n`;
-		topUsers.forEach((user, index) => {
-			response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
-		});
-		
-		ctx.reply(response);
-	} catch (error) {
-		console.error('Ошибка при получении топа пользователей:', error);
-		ctx.reply('Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.');
-	}
+  const [_, period, limitStr] = ctx.message.text.split(' ');
+  const limit = parseInt(limitStr, 10) || 10;
+  
+  if (!['week', 'month'].includes(period)) {
+    return ctx.reply('Пожалуйста, укажите период: "week" для недельной статистики или "month" для месячной статистики.');
+  }
+  
+  try {
+    // Сначала отправляем сообщение о загрузке
+    const loadingMessage = await ctx.reply('⏳ Загрузка статистики...');
+    
+    const topUsers = await getTopUsersOptimized(period, limit);
+    
+    let response;
+    if (topUsers.length === 0) {
+      response = `На этот ${period === 'week' ? 'неделе' : 'месяц'} пока нет данных.`;
+    } else {
+      response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'прошлую неделю' : 'прошлый месяц'}:\n\n`;
+      topUsers.forEach((user, index) => {
+        response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
+      });
+    }
+    
+    // Обновляем сообщение о загрузке финальным результатом
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, 
+      loadingMessage.message_id, 
+      null, 
+      response
+    );
+  } catch (error) {
+    console.error('Ошибка при получении топа пользователей:', error);
+    ctx.reply('Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.');
+  }
 });
 
 const parseDate = (dateString) => {
@@ -443,20 +547,55 @@ bot.command('start', async (ctx) => {
 	);
 });
 
-// bot.hears('📅 Статистика за неделю', async (ctx) => {
-// 	const userId = ctx.message.from.id;
-// 	const stats = await calculateWeeklyStats(userId);
-// 	ctx.reply(formatStatsResponse(stats, 'week'));
-// });
+// Форматирование ответа с топом пользователей
+const formatTopUsersResponse = (topUsers, period) => {
+  if (topUsers.length === 0) {
+    return `За прошлый ${period} пока нет данных.`;
+  }
+  
+  let response = `🏆 Топ-10 пользователей за прошедшую ${period}:\n\n`;
+  topUsers.forEach((user, index) => {
+    response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
+  });
+  
+  return response;
+};
 
+// Обновленные обработчики кнопок с индикатором загрузки
 bot.hears('📊 Топ за прошедшую неделю', async (ctx) => {
-	const topUsers = await getTopUsers('week', 10);
-	ctx.reply(formatTopUsersResponse(topUsers, 'неделю'));
+  try {
+    const loadingMessage = await ctx.reply('⏳ Загрузка статистики...');
+    const topUsers = await getTopUsersOptimized('week', 10);
+    const response = formatTopUsersResponse(topUsers, 'неделю');
+    
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, 
+      loadingMessage.message_id, 
+      null, 
+      response
+    );
+  } catch (error) {
+    console.error('Ошибка при получении топа пользователей:', error);
+    ctx.reply('Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.');
+  }
 });
 
 bot.hears('📊 Топ за прошедший месяц', async (ctx) => {
-	const topUsers = await getTopUsers('month', 10);
-	ctx.reply(formatTopUsersResponse(topUsers, 'месяц'));
+  try {
+    const loadingMessage = await ctx.reply('⏳ Загрузка статистики...');
+    const topUsers = await getTopUsersOptimized('month', 10);
+    const response = formatTopUsersResponse(topUsers, 'месяц');
+    
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, 
+      loadingMessage.message_id, 
+      null, 
+      response
+    );
+  } catch (error) {
+    console.error('Ошибка при получении топа пользователей:', error);
+    ctx.reply('Произошла ошибка при получении статистики. Пожалуйста, попробуйте позже.');
+  }
 });
 
 bot.hears('🍲 Внести свой вклад в проект', async (ctx) => {
@@ -475,25 +614,14 @@ bot.hears('🍲 Внести свой вклад в проект', async (ctx) =
 	);
 });
 
-const formatTopUsersResponse = (topUsers, period) => {
-	if (topUsers.length === 0) {
-		return `За прошлый ${period} пока нет данных.`;
-	}
-	
-	let response = `🏆 Топ-10 пользователей за прошедшую ${period}:\n\n`;
-	topUsers.forEach((user, index) => {
-		response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
-	});
-	
-	return response;
-};
-
+// Инициализация с созданием индексов
 (async () => {
-	await connectToDatabase();
-	bot.launch();
-	console.log('Bot telegram-ride-stat is running');
+  await connectToDatabase();
+  await createRequiredIndexes(); // Создаем индексы при запуске
+  bot.launch();
+  console.log('Bot telegram-ride-stat is running');
 })();
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'))
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
