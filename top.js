@@ -299,30 +299,21 @@ const getTopUsersOptimized = async (period, limit) => {
     { $group: { _id: "$userId", username: { $first: "$username" } } }
   ]).toArray();
   
-  // Собираем все локации за указанный период для оптимизации
-  const allLocations = await collection.find({
-    timestamp: { $gte: startTimestamp, $lte: endTimestamp }
-  }).sort({ userId: 1, sessionId: 1, timestamp: 1 }).toArray();
-  
-  // Группируем локации по пользователям
-  const userLocationsMap = {};
-  allLocations.forEach(loc => {
-    if (!userLocationsMap[loc.userId]) {
-      userLocationsMap[loc.userId] = [];
-    }
-    userLocationsMap[loc.userId].push(loc);
-  });
-  
   // Вычисляем расстояния для каждого пользователя
-  const userStats = uniqueUsers.map(user => {
-    const userLocations = userLocationsMap[user._id] || [];
+  const userStats = [];
+  for (const user of uniqueUsers) {
+    const userLocations = await collection.find({
+      userId: user._id,
+      timestamp: { $gte: startTimestamp, $lte: endTimestamp }
+    }).sort({ sessionId: 1, timestamp: 1 }).toArray();
+    
     const distance = calculateUserDistance(userLocations);
-    return {
+    userStats.push({
       userId: user._id,
       username: user.username,
       distance
-    };
-  });
+    });
+  }
   
   // Сортируем и возвращаем результат
   userStats.sort((a, b) => b.distance - a.distance);
@@ -384,44 +375,22 @@ const calculateStats = async (userId, startTimestamp, endTimestamp) => {
 };
 
 const calculateWeeklyStats = async (userId) => {
-	let startTimestamp, endTimestamp;
-	const lastWeek = new Date();
-	lastWeek.setDate(lastWeek.getDate() - 7); // Сдвиг на неделю назад
-	
-	const dayOfWeek = lastWeek.getDay();
-	const lastMonday = new Date(lastWeek);
-	lastMonday.setHours(0, 0, 0, 0);
-	lastMonday.setDate(lastWeek.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)); // Понедельник прошлой недели
-	const lastSunday = new Date(lastMonday);
-	lastSunday.setDate(lastMonday.getDate() + 6);
-	lastSunday.setHours(23, 59, 59, 999); // Воскресенье прошлой недели
-	
-	startTimestamp = Math.floor(lastMonday.getTime() / 1000);
-	endTimestamp = Math.floor(lastSunday.getTime() / 1000);
-	
+	const { startTimestamp, endTimestamp } = getTimestampRangeForPeriod('week');
 	return calculateStats(userId, startTimestamp, endTimestamp);
 };
 
 const calculateMonthlyStats = async (userId) => {
-	const now = new Date();
-	const lastDayOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-	lastDayOfLastMonth.setHours(23, 59, 59, 999);
-	const firstDayOfLastMonth = new Date(lastDayOfLastMonth.getFullYear(), lastDayOfLastMonth.getMonth(), 1);
-	firstDayOfLastMonth.setHours(0, 0, 0, 0);
-	
-	const startTimestamp = Math.floor(firstDayOfLastMonth.getTime() / 1000);
-	const endTimestamp = Math.floor(lastDayOfLastMonth.getTime() / 1000);
-	
+	const { startTimestamp, endTimestamp } = getTimestampRangeForPeriod('month');
 	return calculateStats(userId, startTimestamp, endTimestamp);
 };
 
-// Старая функция getTopUsers - оставлена для обратной совместимости
+// Обратная совместимость со старой функцией getTopUsers
 const getTopUsers = async (period, limit) => {
 	return getTopUsersOptimized(period, limit);
 };
 
 const formatStatsResponse = (stats, period) => {
-	let response = `За ${period === 'week' ? 'эту неделю' : 'этот месяц'} вы проехали ${stats.distance.toFixed(2)} км со средней скоростью ${stats.speed.toFixed(2)} км/ч.\n\n`;
+	let response = `За ${period === 'week' ? 'прошедшую неделю' : 'прошедший месяц'} вы проехали ${stats.distance.toFixed(2)} км со средней скоростью ${stats.speed.toFixed(2)} км/ч.\n\n`;
 	
 	if (stats.dailyDistances && stats.dailyDistances.length > 0) {
 		response += "Пробег по дням недели:\n";
@@ -470,9 +439,9 @@ bot.command('top', async (ctx) => {
     
     let response;
     if (topUsers.length === 0) {
-      response = `На этот ${period === 'week' ? 'неделе' : 'месяц'} пока нет данных.`;
+      response = `За ${period === 'week' ? 'прошедшую неделю' : 'прошедший месяц'} пока нет данных.`;
     } else {
-      response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'прошлую неделю' : 'прошлый месяц'}:\n\n`;
+      response = `🏆 Топ ${limit} пользователей по пробегу за ${period === 'week' ? 'прошедшую неделю' : 'прошедший месяц'}:\n\n`;
       topUsers.forEach((user, index) => {
         response += `${index + 1}. ${user.username}: ${user.distance.toFixed(2)} км\n`;
       });
@@ -529,28 +498,27 @@ bot.command('sta', async (ctx) => {
 });
 
 bot.command('start', async (ctx) => {
-
 	if (ctx.chat.type !== 'private') {
     ctx.reply('Клавиатура скрыта', Markup.removeKeyboard());
-		return // Просто игнорируем команду в групповых чатах
+		return; // Просто игнорируем команду в групповых чатах
 	}
 
 	await ctx.reply(
-			'Добро пожаловать! Выберите команду:',
-			Markup.keyboard([
-				// ['📅 Статистика за неделю'],
-				['📊 Топ за прошедшую неделю', "📊 Топ за прошедший месяц"],
-				 ['🍲 Внести свой вклад в проект'],
-			])
-					.resize()
-					.oneTime()
+		'Добро пожаловать! Выберите команду:',
+		Markup.keyboard([
+			// ['📅 Статистика за неделю'],
+			['📊 Топ за прошедшую неделю', "📊 Топ за прошедший месяц"],
+			['🍲 Внести свой вклад в проект'],
+		])
+		.resize()
+		.oneTime()
 	);
 });
 
 // Форматирование ответа с топом пользователей
 const formatTopUsersResponse = (topUsers, period) => {
   if (topUsers.length === 0) {
-    return `За прошлый ${period} пока нет данных.`;
+    return `За прошедший ${period} пока нет данных.`;
   }
   
   let response = `🏆 Топ-10 пользователей за прошедшую ${period}:\n\n`;
@@ -612,6 +580,14 @@ bot.hears('🍲 Внести свой вклад в проект', async (ctx) =
 
 Помните, что даже простое использование приложения и обратная связь - это уже огромная поддержка. Спасибо, что вы с нами!`
 	);
+});
+
+// Добавляем обработчик debug для отслеживания всех событий бота
+bot.use((ctx, next) => {
+  if (ctx.updateType === 'message' && ctx.message.location) {
+    console.log('Получено сообщение с геолокацией:', ctx.message.message_id);
+  }
+  return next();
 });
 
 // Инициализация с созданием индексов
