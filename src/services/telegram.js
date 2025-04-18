@@ -2,7 +2,12 @@ const { Telegraf, Markup } = require('telegraf')
 const config = require('../config/constants')
 const locationService = require('./location')
 const statsService = require('./stats')
-const pRetry = require('p-retry').default
+let pRetry
+
+// Динамический импорт p-retry
+import('p-retry').then(module => {
+	pRetry = module.default
+})
 
 class TelegramService {
 	constructor() {
@@ -12,6 +17,10 @@ class TelegramService {
 	}
 
 	async getUserAvatarUrl(userId) {
+		if (!pRetry) {
+			console.error('pRetry module is not loaded yet')
+			return null
+		}
 		try {
 			const photos = await pRetry(
 				async () => {
@@ -65,6 +74,10 @@ class TelegramService {
 	}
 
 	async checkAndRemoveInactiveLocations() {
+		if (!pRetry) {
+			console.error('pRetry module is not loaded yet')
+			return
+		}
 		const now = Date.now()
 
 		for (const [messageId, locationData] of this.activeLocations) {
