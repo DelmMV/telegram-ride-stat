@@ -2,6 +2,7 @@ const { Telegraf, Markup } = require('telegraf')
 const config = require('../config/constants')
 const locationService = require('./location')
 const statsService = require('./stats')
+const pRetry = require('p-retry').default
 
 class TelegramService {
 	constructor() {
@@ -12,10 +13,49 @@ class TelegramService {
 
 	async getUserAvatarUrl(userId) {
 		try {
-			const photos = await this.bot.telegram.getUserProfilePhotos(userId, 0, 1)
+			const photos = await pRetry(
+				async () => {
+					try {
+						return await this.bot.telegram.getUserProfilePhotos(userId, 0, 1)
+					} catch (error) {
+						if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+							throw new pRetry.AbortError(error)
+						}
+						throw error
+					}
+				},
+				{
+					retries: 3,
+					onFailedAttempt: error => {
+						console.warn(
+							`Попытка ${error.attemptNumber} получения фото профиля не удалась. Осталось попыток: ${error.retriesLeft}`
+						)
+					},
+				}
+			)
+
 			if (photos && photos.total_count > 0) {
 				const fileId = photos.photos[0][0].file_id
-				const file = await this.bot.telegram.getFile(fileId)
+				const file = await pRetry(
+					async () => {
+						try {
+							return await this.bot.telegram.getFile(fileId)
+						} catch (error) {
+							if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+								throw new pRetry.AbortError(error)
+							}
+							throw error
+						}
+					},
+					{
+						retries: 3,
+						onFailedAttempt: error => {
+							console.warn(
+								`Попытка ${error.attemptNumber} получения файла не удалась. Осталось попыток: ${error.retriesLeft}`
+							)
+						},
+					}
+				)
 				return `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`
 			}
 		} catch (error) {
@@ -30,10 +70,30 @@ class TelegramService {
 		for (const [messageId, locationData] of this.activeLocations) {
 			if (now - locationData.lastUpdate > config.thresholds.maxInactivity) {
 				try {
-					const chatMember = await this.bot.telegram.getChatMember(
-						locationData.chatId,
-						this.bot.botInfo.id
+					const chatMember = await pRetry(
+						async () => {
+							try {
+								return await this.bot.telegram.getChatMember(
+									locationData.chatId,
+									this.bot.botInfo.id
+								)
+							} catch (error) {
+								if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+									throw new pRetry.AbortError(error)
+								}
+								throw error
+							}
+						},
+						{
+							retries: 3,
+							onFailedAttempt: error => {
+								console.warn(
+									`Attempt ${error.attemptNumber} failed for getChatMember. ${error.retriesLeft} retries left.`
+								)
+							},
+						}
 					)
+
 					if (chatMember.can_delete_messages) {
 						if (locationData.messages && locationData.messages.length > 0) {
 							const sortedMessages = [...locationData.messages].sort(
@@ -42,9 +102,31 @@ class TelegramService {
 
 							for (const message of sortedMessages) {
 								try {
-									await this.bot.telegram.deleteMessage(
-										locationData.chatId,
-										message.messageId
+									await pRetry(
+										async () => {
+											try {
+												await this.bot.telegram.deleteMessage(
+													locationData.chatId,
+													message.messageId
+												)
+											} catch (error) {
+												if (
+													error.code === 'ETIMEDOUT' ||
+													error.code === 'ECONNRESET'
+												) {
+													throw new pRetry.AbortError(error)
+												}
+												throw error
+											}
+										},
+										{
+											retries: 3,
+											onFailedAttempt: error => {
+												console.warn(
+													`Attempt ${error.attemptNumber} failed for deleteMessage. ${error.retriesLeft} retries left.`
+												)
+											},
+										}
 									)
 								} catch (err) {
 									if (
@@ -68,9 +150,31 @@ class TelegramService {
 						}
 
 						try {
-							await this.bot.telegram.deleteMessage(
-								locationData.chatId,
-								messageId
+							await pRetry(
+								async () => {
+									try {
+										await this.bot.telegram.deleteMessage(
+											locationData.chatId,
+											messageId
+										)
+									} catch (error) {
+										if (
+											error.code === 'ETIMEDOUT' ||
+											error.code === 'ECONNRESET'
+										) {
+											throw new pRetry.AbortError(error)
+										}
+										throw error
+									}
+								},
+								{
+									retries: 3,
+									onFailedAttempt: error => {
+										console.warn(
+											`Attempt ${error.attemptNumber} failed for deleteMessage. ${error.retriesLeft} retries left.`
+										)
+									},
+								}
 							)
 						} catch (err) {
 							if (

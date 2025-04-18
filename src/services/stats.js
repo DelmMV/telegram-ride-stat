@@ -128,7 +128,7 @@ class StatsService {
 		const distanceKm = (stats.totalDistance / 1000).toFixed(2)
 
 		return (
-			`📊 Статистика за ${periodText}:\n\n` + `🏃 Пройдено: ${distanceKm} км`
+			`📊 Статистика за прошедшую ${periodText}:\n\n` + `Пройдено: ${distanceKm} км`
 		)
 	}
 
