@@ -246,7 +246,7 @@ class TelegramService {
 
 			const keyboard = Markup.keyboard([
 				['🏆 Топ за прошедшую неделю', '📅 Топ за прошедший месяц'],
-				['📊 Моя статистика'],
+				['📊 Cтатистика за прошедшую неделю'],
 			]).resize()
 
 			await ctx.reply(
@@ -257,7 +257,7 @@ class TelegramService {
 			)
 		})
 
-		this.bot.hears('📊 Моя статистика', async ctx => {
+		this.bot.hears('📊 Cтатистика за прошедшую неделю', async ctx => {
 			if (ctx.chat.type !== 'private') {
 				return
 			}
