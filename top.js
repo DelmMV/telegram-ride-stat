@@ -8,8 +8,24 @@ async function start() {
 		telegramService.start()
 	} catch (error) {
 		console.error('Error starting application:', error)
-		process.exit(1)
+		// Не завершаем процесс сразу, даем возможность nodemon перезапустить
+		setTimeout(() => {
+			process.exit(1)
+		}, 1000)
 	}
 }
+
+// Обработка завершения работы
+process.on('SIGINT', async () => {
+	console.log('Shutting down...')
+	await db.close()
+	process.exit(0)
+})
+
+process.on('SIGTERM', async () => {
+	console.log('Shutting down...')
+	await db.close()
+	process.exit(0)
+})
 
 start()

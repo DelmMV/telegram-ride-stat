@@ -3,6 +3,9 @@ module.exports = {
 		token: process.env.TELEGRAM_BOT_TOKEN,
 		chatId: process.env.MONOPITER_CHAT,
 		messageThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_CHAT,
+		adminThreadId: process.env.MESSAGE_THREAD_ID_ADMIN_CHAT,
+		adminChannelId: process.env.ADMIN_CHAT,
+		announcementThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_ANNONCE,
 	},
 	database: {
 		url: 'mongodb://192.168.0.107:27017',

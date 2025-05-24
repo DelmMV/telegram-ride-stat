@@ -9,12 +9,14 @@ Telegram бот для отслеживания статистики поезд�
 - Статистика по неделям и месяцам
 - Топ пользователей по пройденному расстоянию
 - Автоматическое удаление неактивных геолокаций
+- Создание анонсов каток с модерацией
 
 ## Команды
 
 - `/stats` - Показать вашу статистику за неделю
 - `/top` - Показать топ пользователей за неделю
 - `/month` - Показать топ пользователей за месяц
+- `📢 Создать анонс` - Создать новый анонс катки
 
 ## Установка
 
@@ -35,6 +37,9 @@ npm install
 
 ```
 TELEGRAM_BOT_TOKEN=your_bot_token
+MONOPITER_CHAT=your_chat_id
+MESSAGE_THREAD_ID_MONOPITER_CHAT=your_thread_id
+ADMIN_CHANNEL_ID=your_admin_channel_id
 ```
 
 4. Запустите бота:
@@ -66,6 +71,7 @@ src/
 │   ├── database.js
 │   ├── location.js
 │   ├── stats.js
+│   ├── announcement.js
 │   └── telegram.js
 └── index.js
 ```

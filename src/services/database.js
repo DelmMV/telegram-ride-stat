@@ -5,9 +5,35 @@ class DatabaseService {
 	constructor() {
 		this.client = null
 		this.db = null
+		this.isConnecting = false
+		this.connectionPromise = null
 	}
 
 	async connect() {
+		// Если уже идет подключение, возвращаем существующий промис
+		if (this.isConnecting) {
+			return this.connectionPromise
+		}
+
+		// Если уже подключены, возвращаем существующее подключение
+		if (this.client && this.db) {
+			return { client: this.client, db: this.db }
+		}
+
+		this.isConnecting = true
+		this.connectionPromise = this._connect()
+
+		try {
+			const result = await this.connectionPromise
+			this.isConnecting = false
+			return result
+		} catch (error) {
+			this.isConnecting = false
+			throw error
+		}
+	}
+
+	async _connect() {
 		try {
 			console.log('Connecting to MongoDB...')
 			this.client = new MongoClient(config.database.url)
@@ -15,9 +41,12 @@ class DatabaseService {
 			this.db = this.client.db(config.database.name)
 			console.log('Connected to MongoDB successfully')
 			await this.createIndexes()
+			return { client: this.client, db: this.db }
 		} catch (error) {
 			console.error('MongoDB connection error:', error)
-			process.exit(1)
+			this.client = null
+			this.db = null
+			throw error
 		}
 	}
 
@@ -32,6 +61,7 @@ class DatabaseService {
 			console.log('Indexes created successfully')
 		} catch (error) {
 			console.error('Error creating indexes:', error)
+			throw error
 		}
 	}
 
@@ -90,6 +120,8 @@ class DatabaseService {
 		if (this.client) {
 			console.log('Closing MongoDB connection...')
 			await this.client.close()
+			this.client = null
+			this.db = null
 			console.log('MongoDB connection closed')
 		}
 	}
