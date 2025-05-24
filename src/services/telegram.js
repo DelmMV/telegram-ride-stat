@@ -339,10 +339,18 @@ class TelegramService {
 				console.error('Error sending private message:', error)
 			}
 			
-			// Update admin message
+			// Update admin message with approval status but keep buttons
+			const keyboard = Markup.inlineKeyboard([
+				[
+					Markup.button.callback('✅ Принять', 'approve_announcement'),
+					Markup.button.callback('❌ Отклонить', 'reject_announcement')
+				]
+			])
+			
+			// Keep the original buttons but update the message text
 			await ctx.editMessageText(
 				`${fullModerationText}\n\n✅ Анонс одобрен и опубликован`,
-				{ reply_markup: { inline_keyboard: [] } }
+				{ reply_markup: keyboard.reply_markup }
 			)
 		})
 
@@ -634,7 +642,7 @@ class TelegramService {
 						)
 					) {
 						locationData.messages.push(message)
-						locationData.lastUpdate = Date.now()
+						// Do not update lastUpdate for text messages
 						this.activeLocations.set(locationMessageId, locationData)
 					}
 				}
@@ -654,4 +662,4 @@ class TelegramService {
 	}
 }
 
-module.exports = new TelegramService() 
+module.exports = new TelegramService()
