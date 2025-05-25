@@ -535,6 +535,12 @@ createAnnouncementScene.on('text', async ctx => {
 })
 
 createAnnouncementScene.action('submit_announcement', async ctx => {
+	// Удаляем inline-кнопки превью
+	try {
+		await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+	} catch (e) {
+		// ignore if already edited
+	}
 	// Send to admin channel for moderation
 	const keyboard = Markup.inlineKeyboard([
 		[
@@ -590,6 +596,12 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 })
 
 createAnnouncementScene.action('cancel_announcement', async ctx => {
+	// Удаляем inline-кнопки превью
+	try {
+		await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } })
+	} catch (e) {
+		// ignore if already edited
+	}
 	await ctx.reply(
 		'❌ Создание анонса отменено.',
 		Markup.keyboard([
