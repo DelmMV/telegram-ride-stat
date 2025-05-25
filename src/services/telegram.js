@@ -259,11 +259,8 @@ class TelegramService {
 
 			const keyboard = Markup.keyboard([
 				['🏆 Топ за прошедшую неделю', '📅 Топ за прошедший месяц'],
-				[
-					'📊 Cтатистика за прошедшую неделю',
-					'📢 Создать анонс',
-					'🗺️ Активные поездки',
-				],
+				['📊 Cтатистика за прошедшую неделю'],
+				['📢 Создать анонс покатушки'],
 			]).resize()
 
 			await ctx.reply(
@@ -275,7 +272,7 @@ class TelegramService {
 		})
 
 		// Handle announcement creation button
-		this.bot.hears('📢 Создать анонс', async ctx => {
+		this.bot.hears('📢 Создать анонс покатушки', async ctx => {
 			if (ctx.chat.type !== 'private') {
 				return
 			}
@@ -374,7 +371,7 @@ class TelegramService {
 						{
 							is_anonymous: false,
 							allows_multiple_answers: true,
-							message_thread_id: 2,
+							message_thread_id: config.bot.announcementThreadId,
 						}
 					)
 				}
@@ -517,6 +514,51 @@ class TelegramService {
 			}
 
 			const avatarUrl = await this.getUserAvatarUrl(userId)
+
+			// Удаляем все предыдущие активные геолокации пользователя
+			for (const [key, locationData] of this.activeLocations) {
+				if (typeof key === 'string' && key.startsWith('warning_')) continue
+				if (locationData.userId === userId) {
+					// Удаляем все связанные сообщения
+					if (locationData.messages && locationData.messages.length > 0) {
+						for (const msg of locationData.messages) {
+							try {
+								await this.bot.telegram.deleteMessage(
+									locationData.chatId,
+									msg.messageId
+								)
+							} catch (err) {
+								if (
+									err.response?.description ===
+										'Bad Request: message to delete not found' ||
+									err.response?.description ===
+										"Bad Request: message can't be deleted"
+								) {
+									// Не критично
+								} else {
+									console.error('Error deleting geo message:', err)
+								}
+							}
+						}
+					}
+					// Удаляем основное сообщение геолокации
+					try {
+						await this.bot.telegram.deleteMessage(locationData.chatId, key)
+					} catch (err) {
+						if (
+							err.response?.description ===
+								'Bad Request: message to delete not found' ||
+							err.response?.description ===
+								"Bad Request: message can't be deleted"
+						) {
+							// Не критично
+						} else {
+							console.error('Error deleting geo main message:', err)
+						}
+					}
+					this.activeLocations.delete(key)
+				}
+			}
 
 			if (!live_period || live_period === 2147483647) {
 				try {
@@ -688,7 +730,16 @@ class TelegramService {
 							try {
 								await this.bot.telegram.deleteMessage(chat.id, messageId)
 							} catch (err) {
-								console.error('Error deleting user message:', err)
+								if (
+									err.response?.description ===
+										'Bad Request: message to delete not found' ||
+									err.response?.description ===
+										"Bad Request: message can't be deleted"
+								) {
+									// Не критично, сообщение уже удалено
+								} else {
+									console.error('Error deleting user message:', err)
+								}
 							}
 
 							try {
@@ -697,7 +748,16 @@ class TelegramService {
 									warningMessage.message_id
 								)
 							} catch (err) {
-								console.error('Error deleting warning message:', err)
+								if (
+									err.response?.description ===
+										'Bad Request: message to delete not found' ||
+									err.response?.description ===
+										"Bad Request: message can't be deleted"
+								) {
+									// Не критично, сообщение уже удалено
+								} else {
+									console.error('Error deleting warning message:', err)
+								}
 							}
 						}, config.thresholds.messageDeleteDelay),
 					})
@@ -766,7 +826,16 @@ class TelegramService {
 								locationData.messageId
 							)
 						} catch (err) {
-							console.error('Error deleting user message:', err)
+							if (
+								err.response?.description ===
+									'Bad Request: message to delete not found' ||
+								err.response?.description ===
+									"Bad Request: message can't be deleted"
+							) {
+								// Не критично, сообщение уже удалено
+							} else {
+								console.error('Error deleting user message:', err)
+							}
 						}
 						try {
 							await this.bot.telegram.deleteMessage(
@@ -774,7 +843,16 @@ class TelegramService {
 								locationData.warningMessageId
 							)
 						} catch (err) {
-							console.error('Error deleting warning message:', err)
+							if (
+								err.response?.description ===
+									'Bad Request: message to delete not found' ||
+								err.response?.description ===
+									"Bad Request: message can't be deleted"
+							) {
+								// Не критично, сообщение уже удалено
+							} else {
+								console.error('Error deleting warning message:', err)
+							}
 						}
 						this.activeLocations.delete(key)
 					})()

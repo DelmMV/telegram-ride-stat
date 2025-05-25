@@ -14,7 +14,7 @@ module.exports = {
 	thresholds: {
 		maxDistance: 3000, // Порог для начала новой сессии в метрах
 		maxTime: 2 * 60 * 60, // 2 часа в секундах
-		maxInactivity: 5 * 60 * 1000, // гео без активности в минутах
+		maxInactivity: 1 * 60 * 1000, // гео без активности в минутах
 		messageDeleteDelay: 3 * 1000, // сообщение без геолокации у
 		infiniteLocationDeleteDelay: 5 * 1000, // бесконечные гео
 	},
