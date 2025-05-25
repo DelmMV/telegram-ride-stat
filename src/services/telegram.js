@@ -17,7 +17,7 @@ class TelegramService {
 		this.bot = new Telegraf(config.bot.token)
 		this.activeLocations = new Map()
 		this.loadingMessages = new Map()
-		
+
 		// Initialize session middleware with local storage
 		const localSession = new LocalSession({ database: 'sessions.json' })
 		this.bot.use(localSession.middleware())
@@ -25,11 +25,11 @@ class TelegramService {
 		// ВРЕМЕННЫЙ ОТЛАДОЧНЫЙ MIDDLEWARE ДЛЯ ПОЛУЧЕНИЯ chat id и message_thread_id
 		this.bot.use((ctx, next) => {
 			if (ctx.message) {
-				console.log('chat id:', ctx.chat.id);
-				console.log('message_thread_id:', ctx.message.message_thread_id);
+				console.log('chat id:', ctx.chat.id)
+				console.log('message_thread_id:', ctx.message.message_thread_id)
 			}
-			return next();
-		});
+			return next()
+		})
 	}
 
 	async getUserAvatarUrl(userId) {
@@ -160,8 +160,10 @@ class TelegramService {
 								} catch (err) {
 									// Ignore errors for already deleted messages
 									if (
-										err.response?.description === 'Bad Request: message to delete not found' ||
-										err.response?.description === "Bad Request: message can't be deleted"
+										err.response?.description ===
+											'Bad Request: message to delete not found' ||
+										err.response?.description ===
+											"Bad Request: message can't be deleted"
 									) {
 										continue
 									}
@@ -203,8 +205,10 @@ class TelegramService {
 						} catch (err) {
 							// Ignore errors for already deleted messages
 							if (
-								err.response?.description === 'Bad Request: message to delete not found' ||
-								err.response?.description === "Bad Request: message can't be deleted"
+								err.response?.description ===
+									'Bad Request: message to delete not found' ||
+								err.response?.description ===
+									"Bad Request: message can't be deleted"
 							) {
 								// Continue to next iteration
 								continue
@@ -255,13 +259,13 @@ class TelegramService {
 
 			const keyboard = Markup.keyboard([
 				['🏆 Топ за прошедшую неделю', '📅 Топ за прошедший месяц'],
-				['📊 Cтатистика за прошедшую неделю', '📢 Создать анонс']
+				['📊 Cтатистика за прошедшую неделю', '📢 Создать анонс', '🗺️ Активные поездки'],
 			]).resize()
 
 			await ctx.reply(
 				'👋 Привет! Я бот для отслеживания статистики поездок.\n\n' +
-				'📌 Отправляйте свою геолокацию, чтобы я мог отслеживать ваши поездки.\n\n' +
-				'📊 Используйте кнопки ниже для просмотра статистики:',
+					'📌 Отправляйте свою геолокацию, чтобы я мог отслеживать ваши поездки.\n\n' +
+					'📊 Используйте кнопки ниже для просмотра статистики:',
 				keyboard
 			)
 		})
@@ -280,9 +284,14 @@ class TelegramService {
 			const fullModerationText = message.text
 
 			// Extract voting options from the original message
-			const votingOptionsMatch = fullModerationText.match(/🗳 Варианты для голосования:\n([\s\S]*?)(?=\n\n|$)/)
+			const votingOptionsMatch = fullModerationText.match(
+				/🗳 Варианты для голосования:\n([\s\S]*?)(?=\n\n|$)/
+			)
 			let votingOptions = []
-			let announcementTextToSend = fullModerationText.split('\n\n').slice(1).join('\n\n') // Default to full text after header
+			let announcementTextToSend = fullModerationText
+				.split('\n\n')
+				.slice(1)
+				.join('\n\n') // Default to full text after header
 
 			if (votingOptionsMatch) {
 				votingOptions = votingOptionsMatch[1]
@@ -291,44 +300,51 @@ class TelegramService {
 					.filter(option => option.trim())
 
 				// Find the index where the voting options start and take the text before it
-				const votingStartIndex = fullModerationText.indexOf('🗳 Варианты для голосования:')
+				const votingStartIndex = fullModerationText.indexOf(
+					'🗳 Варианты для голосования:'
+				)
 				if (votingStartIndex !== -1) {
 					// Take the text from after the header up to the start of voting options
-					const headerEndIndex = fullModerationText.indexOf('\n\n', fullModerationText.indexOf('Новый анонс от @') + 1) + 2;
+					const headerEndIndex =
+						fullModerationText.indexOf(
+							'\n\n',
+							fullModerationText.indexOf('Новый анонс от @') + 1
+						) + 2
 					if (headerEndIndex < votingStartIndex) {
-						announcementTextToSend = fullModerationText.substring(headerEndIndex, votingStartIndex).trim()
+						announcementTextToSend = fullModerationText
+							.substring(headerEndIndex, votingStartIndex)
+							.trim()
 					} else {
 						// Should not happen if parsing is correct, but as a fallback
 						announcementTextToSend = fullModerationText.split('\n\n')[1].trim() // Take just the first main block
 					}
 				}
 			} else {
-				 // If no voting options found, just take the main announcement text after the header
-				 announcementTextToSend = fullModerationText.split('\n\n').slice(1).join('\n\n').trim()
+				// If no voting options found, just take the main announcement text after the header
+				announcementTextToSend = fullModerationText
+					.split('\n\n')
+					.slice(1)
+					.join('\n\n')
+					.trim()
 			}
 
-			
-			// Send to main channel - ONLY the announcement text
-			await ctx.telegram.sendMessage(
-				config.bot.chatId,
-				announcementTextToSend,
-				{ message_thread_id: config.bot.announcementThreadId }
-			)
+      // Create poll if voting options exist
+      if (votingOptions.length > 0) {
+        await ctx.telegram.sendPoll(
+          config.bot.chatId,
+          '🗳 Голосование по вариантам маршрута:',
+          votingOptions,
+          {
+            is_anonymous: false,
+            allows_multiple_answers: true,
+            message_thread_id: config.bot.announcementThreadId,
+          }
+        )
+      }
 
-			// Create poll if voting options exist
-			if (votingOptions.length > 0) {
-				await ctx.telegram.sendPoll(
-					config.bot.chatId,
-					'🗳 Голосование по вариантам маршрута:',
-					votingOptions,
-					{
-						is_anonymous: false,
-						allows_multiple_answers: false,
-						message_thread_id: config.bot.announcementThreadId
-					}
-				)
-			}
-			
+      // Store moderation message ID for later reference
+      ctx.session.moderationMessageId = ctx.callbackQuery.message.message_id
+
 			// Notify user in private message
 			try {
 				await ctx.telegram.sendMessage(
@@ -338,26 +354,51 @@ class TelegramService {
 			} catch (error) {
 				console.error('Error sending private message:', error)
 			}
-			
+
+      // Repost announcement to main chat in specified thread with HTML escaping
+      const escapeHTML = (text) => {
+        return text
+          .replace(/&/g, '&')
+          .replace(/</g, '<')
+          .replace(/>/g, '>')
+          .replace(/"/g, '"')
+          .replace(/'/g, '&#039;');
+      };
+
+      try {
+        await ctx.telegram.sendMessage(
+          config.bot.chatId,
+          escapeHTML(announcementTextToSend),
+          {
+            message_thread_id: config.bot.announcementThreadId,
+            parse_mode: 'HTML'
+          }
+        )
+      } catch (error) {
+        console.error('Error reposting announcement to main chat:', error)
+      }
+
 			// Update admin message with approval status but keep buttons
 			const keyboard = Markup.inlineKeyboard([
 				[
 					Markup.button.callback('✅ Принять', 'approve_announcement'),
-					Markup.button.callback('❌ Отклонить', 'reject_announcement')
-				]
+					Markup.button.callback('❌ Отменить', 'reject_announcement'),
+				],
 			])
-			
-			// Keep the original buttons but update the message text
-			await ctx.editMessageText(
-				`${fullModerationText}\n\n✅ Анонс одобрен и опубликован`,
-				{ reply_markup: keyboard.reply_markup }
-			)
+
+			// Update message text and keep buttons only if not already approved
+if (!fullModerationText.includes('✅ Анонс одобрен')) {
+    await ctx.editMessageText(
+        `${fullModerationText}\n\n✅ Анонс одобрен и опубликован`,
+        { reply_markup: keyboard.reply_markup }
+    )
+}
 		})
 
 		this.bot.action('reject_announcement', async ctx => {
 			const message = ctx.callbackQuery.message
 			const username = message.text.split('от @')[1].split(':')[0]
-			
+
 			// Send rejection notification in private message
 			try {
 				await ctx.telegram.sendMessage(
@@ -367,11 +408,10 @@ class TelegramService {
 			} catch (error) {
 				console.error('Error sending private message:', error)
 			}
-			
-			await ctx.editMessageText(
-				`${message.text}\n\n❌ Анонс отклонен`,
-				{ reply_markup: { inline_keyboard: [] } }
-			)
+
+			await ctx.editMessageText(`${message.text}\n\n❌ Анонс отклонен`, {
+				reply_markup: { inline_keyboard: [] },
+			})
 		})
 
 		this.bot.hears('📊 Cтатистика за прошедшую неделю', async ctx => {
@@ -564,6 +604,7 @@ class TelegramService {
 				)
 			}
 		})
+		
 
 		this.bot.on('message', async ctx => {
 			const {
@@ -605,24 +646,39 @@ class TelegramService {
 						}
 					)
 
-					setTimeout(async () => {
-						try {
-							await this.bot.telegram.deleteMessage(chat.id, messageId)
-							await this.bot.telegram.deleteMessage(
-								chat.id,
-								warningMessage.message_id
-							)
-						} catch (err) {
-							console.error('Error deleting messages:', err)
-						}
-					}, config.thresholds.messageDeleteDelay)
+					// Store both messages in activeLocations for cleanup
+					this.activeLocations.set(`warning_${messageId}`, {
+						chatId: chat.id,
+						messageId,
+						warningMessageId: warningMessage.message_id,
+						userId: from.id,
+						timeout: setTimeout(async () => {
+							try {
+								await this.bot.telegram.deleteMessage(chat.id, messageId)
+							} catch (err) {
+								console.error('Error deleting user message:', err)
+							}
+
+							try {
+								await this.bot.telegram.deleteMessage(
+									chat.id,
+									warningMessage.message_id
+								)
+							} catch (err) {
+								console.error('Error deleting warning message:', err)
+							}
+						}, config.thresholds.messageDeleteDelay),
+					})
 				} catch (err) {
 					console.error('Error sending warning message:', err)
 				}
 				return
 			}
 
-			for (const [locationMessageId, locationData] of this.activeLocations) {
+			for (const [key, locationData] of this.activeLocations) {
+				// Skip warning messages
+				if (key.startsWith('warning_')) continue
+
 				const messageTimestamp = date * 1000
 				const locationTimestamp = locationData.timestamp
 
@@ -636,15 +692,16 @@ class TelegramService {
 						userId: from.id,
 					}
 
-					if (
-						!locationData.messages.some(
-							msg => msg.messageId === message.messageId
-						)
-					) {
-						locationData.messages.push(message)
-						// Do not update lastUpdate for text messages
-						this.activeLocations.set(locationMessageId, locationData)
-					}
+						if (
+							!locationData.messages.some(
+								msg => msg.messageId === message.messageId
+							)
+						) {
+							locationData.messages.push(message)
+							// Update lastUpdate for text messages to keep location active
+							locationData.lastUpdate = Date.now()
+							this.activeLocations.set(key, locationData)
+						}
 				}
 			}
 		})
@@ -654,9 +711,37 @@ class TelegramService {
 		// Create stage with scenes
 		const stage = new Scenes.Stage([createAnnouncementScene])
 		this.bot.use(stage.middleware())
-		
+
 		this.setupHandlers()
 		setInterval(() => this.checkAndRemoveInactiveLocations(), 60000)
+		// Add cleanup for warning messages
+		setInterval(() => {
+			const now = Date.now()
+			for (const [key, locationData] of this.activeLocations) {
+				if (
+					key.startsWith('warning_') &&
+					locationData.timeout &&
+					now >=
+						locationData.timeout._idleStart +
+							config.thresholds.messageDeleteDelay
+				) {
+        // Delete both messages before removing from activeLocations
+        ;(async () => {
+          try {
+            await this.bot.telegram.deleteMessage(locationData.chatId, locationData.messageId)
+          } catch (err) {
+            console.error('Error deleting user message:', err)
+          }
+          try {
+            await this.bot.telegram.deleteMessage(locationData.chatId, locationData.warningMessageId)
+          } catch (err) {
+            console.error('Error deleting warning message:', err)
+          }
+          this.activeLocations.delete(key)
+        })()
+				}
+			}
+		}, 60000)
 		this.bot.launch()
 		console.log('Bot started')
 	}

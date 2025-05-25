@@ -553,9 +553,8 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 
 	await ctx.telegram.sendMessage(
 		config.bot.adminChannelId,
-		`Новый анонс от @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}`,
+		`Новый анонс от (тест) @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}`,keyboard,
 		{
-			reply_markup: keyboard,
 			message_thread_id: config.bot.adminThreadId,
 		}
 	)
