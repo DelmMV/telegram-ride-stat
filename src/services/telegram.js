@@ -374,7 +374,7 @@ class TelegramService {
 						{
 							is_anonymous: false,
 							allows_multiple_answers: true,
-							message_thread_id: config.bot.announcementThreadId,
+							message_thread_id: 2,
 						}
 					)
 				}
@@ -382,15 +382,6 @@ class TelegramService {
 				console.error('Error reposting announcement to main chat:', error)
 			}
 
-			// Update admin message with approval status but keep buttons
-			// const keyboard = Markup.inlineKeyboard([
-			//     [
-			//         Markup.button.callback('✅ Принять', 'approve_announcement'),
-			//         Markup.button.callback('❌ Отменить', 'reject_announcement'),
-			//     ],
-			// ])
-
-			// Update message text and REMOVE buttons after approval
 			if (!fullModerationText.includes('✅ Анонс одобрен')) {
 				await ctx.editMessageText(
 					`${fullModerationText}\n\n✅ Анонс одобрен и опубликован`,

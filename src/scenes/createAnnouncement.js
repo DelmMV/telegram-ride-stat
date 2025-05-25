@@ -551,13 +551,30 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 					.join('\n')
 			: ''
 
-	await ctx.telegram.sendMessage(
-		config.bot.adminChannelId,
-		`Новый анонс от (тест) @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}`,keyboard,
-		{
-			message_thread_id: config.bot.adminThreadId,
-		}
-	)
+	const moderationText = `Новый анонс от (тест) @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}`
+
+	console.log('SEND TO MODERATION:', {
+		chatId: config.bot.adminChannelId,
+		threadId: config.bot.adminThreadId,
+		typeChatId: typeof config.bot.adminChannelId,
+		typeThreadId: typeof config.bot.adminThreadId,
+		moderationText,
+		keyboard,
+	})
+
+	try {
+		const res = await ctx.telegram.sendMessage(
+			config.bot.adminChannelId,
+			moderationText,
+			{
+				...keyboard,
+				message_thread_id: Number(config.bot.adminThreadId),
+			}
+		)
+		console.log('MODERATION MESSAGE SENT:', res)
+	} catch (err) {
+		console.error('ERROR SENDING MODERATION MESSAGE:', err)
+	}
 
 	await ctx.reply(
 		'✅ Анонс отправлен на модерацию. Вы получите уведомление после проверки.',
