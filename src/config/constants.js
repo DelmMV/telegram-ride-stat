@@ -15,8 +15,8 @@ module.exports = {
 		maxDistance: 3000, // Порог для начала новой сессии в метрах
 		maxTime: 2 * 60 * 60, // 2 часа в секундах
 		maxInactivity: 45 * 60 * 1000, // гео без активности в минутах
-		messageDeleteDelay: 10 * 1000, // сообщение без геолокации у
-		infiniteLocationDeleteDelay: 10 * 1000, // бесконечные гео
+		messageDeleteDelay: 3 * 1000, // сообщение без геолокации у
+		infiniteLocationDeleteDelay: 5 * 1000, // бесконечные гео
 	},
 	cache: {
 		ttl: 3600000, // 1 час в миллисекундах

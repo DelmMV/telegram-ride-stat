@@ -259,7 +259,11 @@ class TelegramService {
 
 			const keyboard = Markup.keyboard([
 				['🏆 Топ за прошедшую неделю', '📅 Топ за прошедший месяц'],
-				['📊 Cтатистика за прошедшую неделю', '📢 Создать анонс', '🗺️ Активные поездки'],
+				[
+					'📊 Cтатистика за прошедшую неделю',
+					'📢 Создать анонс',
+					'🗺️ Активные поездки',
+				],
 			]).resize()
 
 			await ctx.reply(
@@ -328,22 +332,8 @@ class TelegramService {
 					.trim()
 			}
 
-      // Create poll if voting options exist
-      if (votingOptions.length > 0) {
-        await ctx.telegram.sendPoll(
-          config.bot.chatId,
-          '🗳 Голосование по вариантам маршрута:',
-          votingOptions,
-          {
-            is_anonymous: false,
-            allows_multiple_answers: true,
-            message_thread_id: config.bot.announcementThreadId,
-          }
-        )
-      }
-
-      // Store moderation message ID for later reference
-      ctx.session.moderationMessageId = ctx.callbackQuery.message.message_id
+			// Store moderation message ID for later reference
+			ctx.session.moderationMessageId = ctx.callbackQuery.message.message_id
 
 			// Notify user in private message
 			try {
@@ -355,58 +345,109 @@ class TelegramService {
 				console.error('Error sending private message:', error)
 			}
 
-      // Repost announcement to main chat in specified thread with HTML escaping
-      const escapeHTML = (text) => {
-        return text
-          .replace(/&/g, '&')
-          .replace(/</g, '<')
-          .replace(/>/g, '>')
-          .replace(/"/g, '"')
-          .replace(/'/g, '&#039;');
-      };
+			// Repost announcement to main chat in specified thread with HTML escaping
+			const escapeHTML = text => {
+				return text
+					.replace(/&/g, '&')
+					.replace(/</g, '<')
+					.replace(/>/g, '>')
+					.replace(/"/g, '"')
+					.replace(/'/g, '&#039;')
+			}
 
-      try {
-        await ctx.telegram.sendMessage(
-          config.bot.chatId,
-          escapeHTML(announcementTextToSend),
-          {
-            message_thread_id: config.bot.announcementThreadId,
-            parse_mode: 'HTML'
-          }
-        )
-      } catch (error) {
-        console.error('Error reposting announcement to main chat:', error)
-      }
+			try {
+				// Сначала отправляем анонс
+				await ctx.telegram.sendMessage(
+					config.bot.chatId,
+					escapeHTML(announcementTextToSend),
+					{
+						message_thread_id: config.bot.announcementThreadId,
+						parse_mode: 'HTML',
+					}
+				)
+				// Затем — голосование, если есть варианты
+				if (votingOptions.length > 0) {
+					await ctx.telegram.sendPoll(
+						config.bot.chatId,
+						'🗳 Голосование по вариантам маршрута:',
+						votingOptions,
+						{
+							is_anonymous: false,
+							allows_multiple_answers: true,
+							message_thread_id: config.bot.announcementThreadId,
+						}
+					)
+				}
+			} catch (error) {
+				console.error('Error reposting announcement to main chat:', error)
+			}
 
 			// Update admin message with approval status but keep buttons
-			const keyboard = Markup.inlineKeyboard([
-				[
-					Markup.button.callback('✅ Принять', 'approve_announcement'),
-					Markup.button.callback('❌ Отменить', 'reject_announcement'),
-				],
-			])
+			// const keyboard = Markup.inlineKeyboard([
+			//     [
+			//         Markup.button.callback('✅ Принять', 'approve_announcement'),
+			//         Markup.button.callback('❌ Отменить', 'reject_announcement'),
+			//     ],
+			// ])
 
-			// Update message text and keep buttons only if not already approved
-if (!fullModerationText.includes('✅ Анонс одобрен')) {
-    await ctx.editMessageText(
-        `${fullModerationText}\n\n✅ Анонс одобрен и опубликован`,
-        { reply_markup: keyboard.reply_markup }
-    )
-}
+			// Update message text and REMOVE buttons after approval
+			if (!fullModerationText.includes('✅ Анонс одобрен')) {
+				await ctx.editMessageText(
+					`${fullModerationText}\n\n✅ Анонс одобрен и опубликован`,
+					{ reply_markup: { inline_keyboard: [] } }
+				)
+			}
 		})
 
 		this.bot.action('reject_announcement', async ctx => {
 			const message = ctx.callbackQuery.message
-			const username = message.text.split('от @')[1].split(':')[0]
+			let username = null
 
-			// Send rejection notification in private message
-			try {
-				await ctx.telegram.sendMessage(
-					ctx.from.id,
-					'❌ Ваш анонс отклонен. Пожалуйста, создайте новый анонс с учетом правил.'
+			// Сначала ищем username после 'от', допускаем любые символы между 'от' и '@'
+			let usernameMatch = message.text.match(/от[^@\n]*@(\w+)/)
+			if (usernameMatch) {
+				username = usernameMatch[1]
+			} else {
+				// Пробуем найти в строке Организаторы
+				usernameMatch = message.text.match(/Организаторы: @(\w+)/)
+				if (usernameMatch) {
+					username = usernameMatch[1]
+				}
+			}
+
+			if (!username) {
+				console.warn(
+					'Не удалось извлечь username из текста сообщения:',
+					message.text
 				)
-			} catch (error) {
-				console.error('Error sending private message:', error)
+			}
+
+			// Получаем username или имя администратора
+			let adminName = ctx.from.username
+			if (!adminName) {
+				adminName = ctx.from.first_name || 'администратор'
+			} else {
+				adminName = `@${adminName}`
+			}
+
+			// Send rejection notification in private message, если username найден
+			if (username) {
+				try {
+					// Получаем userId автора анонса через username (если возможно)
+					// Здесь предполагается, что есть способ получить userId по username, иначе отправить нельзя
+					// Для Telegraf напрямую нельзя, если только не хранить userId при создании анонса
+					// Пока отправляем админу (ctx.from.id) как раньше, но в реальном боте нужен userId автора
+					await ctx.telegram.sendMessage(
+						ctx.from.id,
+						`❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`
+					)
+				} catch (error) {
+					console.error('Error sending private message:', error)
+				}
+			} else {
+				console.warn(
+					'Пропущено отправление личного сообщения из-за отсутствия username.'
+				)
 			}
 
 			await ctx.editMessageText(`${message.text}\n\n❌ Анонс отклонен`, {
@@ -604,7 +645,6 @@ if (!fullModerationText.includes('✅ Анонс одобрен')) {
 				)
 			}
 		})
-		
 
 		this.bot.on('message', async ctx => {
 			const {
@@ -627,7 +667,8 @@ if (!fullModerationText.includes('✅ Анонс одобрен')) {
 			}
 
 			let hasActiveLocation = false
-			for (const [_, locationData] of this.activeLocations) {
+			for (const [key, locationData] of this.activeLocations) {
+				if (typeof key === 'string' && key.startsWith('warning_')) continue
 				if (locationData.userId === from.id) {
 					hasActiveLocation = true
 					break
@@ -677,7 +718,7 @@ if (!fullModerationText.includes('✅ Анонс одобрен')) {
 
 			for (const [key, locationData] of this.activeLocations) {
 				// Skip warning messages
-				if (key.startsWith('warning_')) continue
+				if (typeof key === 'string' && key.startsWith('warning_')) continue
 
 				const messageTimestamp = date * 1000
 				const locationTimestamp = locationData.timestamp
@@ -692,16 +733,16 @@ if (!fullModerationText.includes('✅ Анонс одобрен')) {
 						userId: from.id,
 					}
 
-						if (
-							!locationData.messages.some(
-								msg => msg.messageId === message.messageId
-							)
-						) {
-							locationData.messages.push(message)
-							// Update lastUpdate for text messages to keep location active
-							locationData.lastUpdate = Date.now()
-							this.activeLocations.set(key, locationData)
-						}
+					if (
+						!locationData.messages.some(
+							msg => msg.messageId === message.messageId
+						)
+					) {
+						locationData.messages.push(message)
+						// Update lastUpdate for text messages to keep location active
+						locationData.lastUpdate = Date.now()
+						this.activeLocations.set(key, locationData)
+					}
 				}
 			}
 		})
@@ -719,26 +760,33 @@ if (!fullModerationText.includes('✅ Анонс одобрен')) {
 			const now = Date.now()
 			for (const [key, locationData] of this.activeLocations) {
 				if (
+					typeof key === 'string' &&
 					key.startsWith('warning_') &&
 					locationData.timeout &&
 					now >=
 						locationData.timeout._idleStart +
 							config.thresholds.messageDeleteDelay
 				) {
-        // Delete both messages before removing from activeLocations
-        ;(async () => {
-          try {
-            await this.bot.telegram.deleteMessage(locationData.chatId, locationData.messageId)
-          } catch (err) {
-            console.error('Error deleting user message:', err)
-          }
-          try {
-            await this.bot.telegram.deleteMessage(locationData.chatId, locationData.warningMessageId)
-          } catch (err) {
-            console.error('Error deleting warning message:', err)
-          }
-          this.activeLocations.delete(key)
-        })()
+					// Delete both messages before removing from activeLocations
+					;(async () => {
+						try {
+							await this.bot.telegram.deleteMessage(
+								locationData.chatId,
+								locationData.messageId
+							)
+						} catch (err) {
+							console.error('Error deleting user message:', err)
+						}
+						try {
+							await this.bot.telegram.deleteMessage(
+								locationData.chatId,
+								locationData.warningMessageId
+							)
+						} catch (err) {
+							console.error('Error deleting warning message:', err)
+						}
+						this.activeLocations.delete(key)
+					})()
 				}
 			}
 		}, 60000)
