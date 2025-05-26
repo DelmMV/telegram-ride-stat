@@ -3,41 +3,14 @@
     {
       "id": "1303534476:1303534476",
       "data": {
-        "__scenes": {
-          "current": "create_announcement",
-          "state": {
-            "messageId": 14483,
-            "announcement": {
-              "date": "12.12.1212",
-              "name": "фывфыв",
-              "meetingPlace": "фывфыв",
-              "startTime": "12:33",
-              "routeDistance": "34",
-              "routeLink": null,
-              "charges": "авфываыа",
-              "roadTypes": [
-                {
-                  "name": "пч",
-                  "selected": true
-                }
-              ],
-              "speed": "44",
-              "description": "фывфыв",
-              "organizer": "ncr_d",
-              "votingOptions": []
-            },
-            "step": "voting",
-            "formattedAnnouncementFinal": "📅 12.12.1212\n\n🏁 фывфыв\n\n📍 Место сбора: фывфыв\n⏰ Старт в 12:33\n🗺 Маршрут 34 км\n🪫 Зарядки: авфываыа\n🛣 Едем по: пч\n🚀 Скорость: 44 км/ч\n📝 фывфыв\n\n👥 Организаторы: @ncr_d",
-            "votingOptions": []
-          }
-        }
+        "__scenes": {}
       }
     },
     {
       "id": "-1001959551535:1303534476",
       "data": {
         "__scenes": {},
-        "moderationMessageId": 7209
+        "moderationMessageId": 7211
       }
     },
     {

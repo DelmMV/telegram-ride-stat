@@ -269,21 +269,24 @@ createAnnouncementScene.on('text', async ctx => {
 			await ctx.reply(`Выбранные типы дорог: ${selectedTypes || 'нет'}`)
 		}
 	} else if (ctx.scene.state.step === 'speed') {
-		const speedRegex = /^от \d+ до \d+$|\d+$/
-		if (!speedRegex.test(text)) {
+		// Check if the input is a range or a single number
+		let speedValue = text;
+		if (text.startsWith('от ') && text.includes(' до ')) {
+			speedValue = text
+				.replace('от ', '')
+				.replace(' до ', '-')
+		}
+		
+		// Use the same regex as in validateAnnouncement function
+		const speedRegex = /^\d+-\d+$|^\d+$/
+		if (!speedRegex.test(speedValue)) {
 			await ctx.reply(
 				'Неверный формат скорости. Используйте формат "X" или "от X до Y"'
 			)
 			return
 		}
-		// Check if the input is a range or a single number
-		if (text.startsWith('от ') && text.includes(' до ')) {
-			ctx.scene.state.announcement.speed = text
-				.replace('от ', '')
-				.replace(' до ', '-')
-		} else {
-			ctx.scene.state.announcement.speed = text // Save single number as is
-		}
+		// Store the validated speed value
+		ctx.scene.state.announcement.speed = speedValue
 		ctx.scene.state.step = 'description'
 		await updateMessage(
 			'Дата: ' +

@@ -70,7 +70,7 @@ class AnnouncementService {
 		if (!speedRegex.test(announcement.speed)) {
 			return {
 				isValid: false,
-				errors: 'Неверный формат скорости. Используйте формат "X" или "X-Y"',
+				errors: 'Неверный формат скорости. Используйте формат "X" или "от X до Y"',
 			}
 		}
 

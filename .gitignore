@@ -5,6 +5,5 @@ node_modules/
 .env
 # macOS
 .DS_Store
-
-
 sessions.json
+.windsurfrules
