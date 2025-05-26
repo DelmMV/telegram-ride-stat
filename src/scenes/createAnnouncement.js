@@ -243,7 +243,7 @@ createAnnouncementScene.on('text', async ctx => {
 					'Типы дорог: ' +
 					selectedTypes +
 					'\n\n' +
-					'Введите скорость в формате "от X до Y":',
+					'Введите скорость в формате "X" или "от X до Y":',
 				Markup.keyboard([['❌ Отмена']]).resize()
 			)
 		} else {
@@ -269,16 +269,21 @@ createAnnouncementScene.on('text', async ctx => {
 			await ctx.reply(`Выбранные типы дорог: ${selectedTypes || 'нет'}`)
 		}
 	} else if (ctx.scene.state.step === 'speed') {
-		const speedRegex = /^от \d+ до \d+$/
+		const speedRegex = /^от \d+ до \d+$|\d+$/
 		if (!speedRegex.test(text)) {
 			await ctx.reply(
-				'Неверный формат скорости. Используйте формат "от X до Y"'
+				'Неверный формат скорости. Используйте формат "X" или "от X до Y"'
 			)
 			return
 		}
-		ctx.scene.state.announcement.speed = text
-			.replace('от ', '')
-			.replace(' до ', '-')
+		// Check if the input is a range or a single number
+		if (text.startsWith('от ') && text.includes(' до ')) {
+			ctx.scene.state.announcement.speed = text
+				.replace('от ', '')
+				.replace(' до ', '-')
+		} else {
+			ctx.scene.state.announcement.speed = text // Save single number as is
+		}
 		ctx.scene.state.step = 'description'
 		await updateMessage(
 			'Дата: ' +
@@ -308,10 +313,13 @@ createAnnouncementScene.on('text', async ctx => {
 					.map(t => t.name)
 					.join(', ') +
 				'\n' +
-				'Скорость: от ' +
-				ctx.scene.state.announcement.speed.split('-')[0] +
-				' до ' +
-				ctx.scene.state.announcement.speed.split('-')[1] +
+				'Скорость: ' +
+				(ctx.scene.state.announcement.speed.includes('-')
+					? 'от ' +
+					  ctx.scene.state.announcement.speed.split('-')[0] +
+					  ' до ' +
+					  ctx.scene.state.announcement.speed.split('-')[1]
+					: ctx.scene.state.announcement.speed) +
 				' км/ч' +
 				'\n' +
 				'\n' +
@@ -349,10 +357,13 @@ createAnnouncementScene.on('text', async ctx => {
 					.map(t => t.name)
 					.join(', ') +
 				'\n' +
-				'Скорость: от ' +
-				ctx.scene.state.announcement.speed.split('-')[0] +
-				' до ' +
-				ctx.scene.state.announcement.speed.split('-')[1] +
+				'Скорость: ' +
+				(ctx.scene.state.announcement.speed.includes('-')
+					? 'от ' +
+					  ctx.scene.state.announcement.speed.split('-')[0] +
+					  ' до ' +
+					  ctx.scene.state.announcement.speed.split('-')[1]
+					: ctx.scene.state.announcement.speed) +
 				' км/ч' +
 				'\n' +
 				'Описание: ' +
@@ -406,10 +417,13 @@ createAnnouncementScene.on('text', async ctx => {
 					.map(t => t.name)
 					.join(', ') +
 				'\n' +
-				'Скорость: от ' +
-				ctx.scene.state.announcement.speed.split('-')[0] +
-				' до ' +
-				ctx.scene.state.announcement.speed.split('-')[1] +
+				'Скорость: ' +
+				(ctx.scene.state.announcement.speed.includes('-')
+					? 'от ' +
+					  ctx.scene.state.announcement.speed.split('-')[0] +
+					  ' до ' +
+					  ctx.scene.state.announcement.speed.split('-')[1]
+					: ctx.scene.state.announcement.speed) +
 				' км/ч' +
 				'\n' +
 				'Описание: ' +
@@ -522,10 +536,13 @@ createAnnouncementScene.on('text', async ctx => {
 						.map(t => t.name)
 						.join(', ') +
 					'\n' +
-					'Скорость: от ' +
-					ctx.scene.state.announcement.speed.split('-')[0] +
-					' до ' +
-					ctx.scene.state.announcement.speed.split('-')[1] +
+					'Скорость: ' +
+					(ctx.scene.state.announcement.speed.includes('-')
+						? 'от ' +
+						  ctx.scene.state.announcement.speed.split('-')[0] +
+						  ' до ' +
+						  ctx.scene.state.announcement.speed.split('-')[1]
+						: ctx.scene.state.announcement.speed) +
 					' км/ч' +
 					'\n' +
 					'Описание: ' +
