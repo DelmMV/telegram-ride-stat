@@ -499,6 +499,14 @@ createAnnouncementScene.on('text', async ctx => {
 				Markup.keyboard([['❌ Отмена']]).resize()
 			)
 		} else {
+			// Check if we've already reached the maximum number of poll options (10)
+			if (ctx.scene.state.announcement.votingOptions && ctx.scene.state.announcement.votingOptions.length >= 10) {
+				await ctx.reply(
+					'Ошибка: В опросе Телеграм может быть максимум 10 вариантов ответа. Вы уже добавили максимальное количество. Нажмите "✅ Готово" для завершения.'
+				)
+				return
+			}
+			
 			// Check if the voting option exceeds Telegram's 100 character limit
 			if (text.length > 100) {
 				await ctx.reply(
