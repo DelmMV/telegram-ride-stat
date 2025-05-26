@@ -116,7 +116,7 @@ createAnnouncementScene.on('text', async ctx => {
 				'Время старта: ' +
 				text +
 				'\n\n' +
-				'Введите длину маршрута в километрах:',
+				'Введите длину маршрута в формате "X" только число:',
 			Markup.keyboard([['❌ Отмена']]).resize()
 		)
 	} else if (ctx.scene.state.step === 'routeDistance') {
@@ -307,9 +307,13 @@ createAnnouncementScene.on('text', async ctx => {
 					.map(t => t.name)
 					.join(', ') +
 				'\n' +
-				'Скорость: ' +
-				text +
-				'\n\n' +
+				'Скорость: от ' +
+				ctx.scene.state.announcement.speed.split('-')[0] +
+				' до ' +
+				ctx.scene.state.announcement.speed.split('-')[1] +
+				' км/ч' +
+				'\n' +
+				'\n' +
 				'Введите краткое описание маршрута:',
 			Markup.keyboard([['❌ Отмена']]).resize()
 		)
@@ -348,6 +352,7 @@ createAnnouncementScene.on('text', async ctx => {
 				ctx.scene.state.announcement.speed.split('-')[0] +
 				' до ' +
 				ctx.scene.state.announcement.speed.split('-')[1] +
+				' км/ч' +
 				'\n' +
 				'Описание: ' +
 				text +
@@ -404,6 +409,7 @@ createAnnouncementScene.on('text', async ctx => {
 				ctx.scene.state.announcement.speed.split('-')[0] +
 				' до ' +
 				ctx.scene.state.announcement.speed.split('-')[1] +
+				' км/ч' +
 				'\n' +
 				'Описание: ' +
 				ctx.scene.state.announcement.description +
@@ -465,10 +471,14 @@ createAnnouncementScene.on('text', async ctx => {
 					formattedAnnouncementFinal + // Use final version for preview base
 					votingTextPreview +
 					'\n\n' + // Add preview voting text
-					'Проверьте все данные. Вы можете:\n' +
-					'✅ Отправить на модерацию - отправить анонс на проверку\n' +
-					'❌ Отменить - отменить создание анонса',
+					'Проверьте все данные.\n',
 				keyboard
+			)
+
+			// Отправляем отдельное сообщение с клавиатурой только с кнопкой "Отмена"
+			await ctx.reply(
+				'Используйте кнопку "Отправить на модерацию" что-бы отправить анонс на проверку и кнопку "Отмена", если передумали отправлять анонс.',
+				Markup.keyboard([['❌ Отмена']]).resize()
 			)
 		} else {
 			// Add new voting option
@@ -515,6 +525,7 @@ createAnnouncementScene.on('text', async ctx => {
 					ctx.scene.state.announcement.speed.split('-')[0] +
 					' до ' +
 					ctx.scene.state.announcement.speed.split('-')[1] +
+					' км/ч' +
 					'\n' +
 					'Описание: ' +
 					ctx.scene.state.announcement.description +
@@ -583,6 +594,13 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 		console.error('ERROR SENDING MODERATION MESSAGE:', err)
 	}
 
+	// Сначала отправляем сообщение о модерации
+	// await ctx.reply(
+	// 	'✅ Анонс отправлен на модерацию. Вы получите уведомление после проверки.'
+	// )
+
+	// Затем отправляем сообщение со стандартной клавиатурой
+	// Отправляем новое сообщение с подтверждением и стандартной клавиатурой
 	await ctx.reply(
 		'✅ Анонс отправлен на модерацию. Вы получите уведомление после проверки.',
 		Markup.keyboard([

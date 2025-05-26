@@ -21,15 +21,6 @@ class TelegramService {
 		// Initialize session middleware with local storage
 		const localSession = new LocalSession({ database: 'sessions.json' })
 		this.bot.use(localSession.middleware())
-
-		// ВРЕМЕННЫЙ ОТЛАДОЧНЫЙ MIDDLEWARE ДЛЯ ПОЛУЧЕНИЯ chat id и message_thread_id
-		this.bot.use((ctx, next) => {
-			if (ctx.message) {
-				console.log('chat id:', ctx.chat.id)
-				console.log('message_thread_id:', ctx.message.message_thread_id)
-			}
-			return next()
-		})
 	}
 
 	async getUserAvatarUrl(userId) {
@@ -366,7 +357,7 @@ class TelegramService {
 				if (votingOptions.length > 0) {
 					await ctx.telegram.sendPoll(
 						config.bot.chatId,
-						'🗳 Голосование по вариантам маршрута:',
+						'🗳 Голосование:',
 						votingOptions,
 						{
 							is_anonymous: false,
