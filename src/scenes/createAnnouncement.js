@@ -708,7 +708,7 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 		trackImageMetadata = `\n\n<!-- TRACK_IMAGE:${ctx.scene.state.announcement.trackImage.fileName} -->`
 	}
 
-	const moderationText = `Новый анонс от (тест) @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}${trackImageMetadata}`
+	const moderationText = `Новый анонс от @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}${trackImageMetadata}`
 
 	console.log('SEND TO MODERATION:', {
 		chatId: config.bot.adminChannelId,
