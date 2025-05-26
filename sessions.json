@@ -3,7 +3,35 @@
     {
       "id": "1303534476:1303534476",
       "data": {
-        "__scenes": {}
+        "__scenes": {
+          "current": "create_announcement",
+          "state": {
+            "messageId": 15348,
+            "announcement": {
+              "date": "12.12.1212",
+              "name": "фывфыв",
+              "meetingPlace": "фывфыв",
+              "startTime": "12:12",
+              "routeDistance": "34",
+              "routeLink": null,
+              "charges": "фвыывфыв",
+              "roadTypes": [
+                {
+                  "name": "лесные тропы",
+                  "selected": true
+                }
+              ],
+              "speed": "12",
+              "description": "фывфыв",
+              "organizer": "ncr_d",
+              "votingOptions": [
+                "Да",
+                "Не мне лень"
+              ]
+            },
+            "step": "voting"
+          }
+        }
       }
     },
     {

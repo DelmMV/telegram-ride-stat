@@ -499,6 +499,15 @@ createAnnouncementScene.on('text', async ctx => {
 				Markup.keyboard([['❌ Отмена']]).resize()
 			)
 		} else {
+			// Check if the voting option exceeds Telegram's 100 character limit
+			if (text.length > 100) {
+				await ctx.reply(
+					'Ошибка: Вариант для голосования не может превышать 100 символов. Ваш вариант содержит ' + 
+					text.length + ' символов. Пожалуйста, сократите текст.'
+				)
+				return
+			}
+
 			// Add new voting option
 			ctx.scene.state.announcement.votingOptions.push(text)
 
