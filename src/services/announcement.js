@@ -96,15 +96,19 @@ class AnnouncementService {
 			  )}`
 			: `@${announcement.organizer}`
 
+		// Check if the track is provided as an image
+		const hasTrackImage = announcement.trackImage !== undefined && announcement.trackImage !== null
+		const trackText = hasTrackImage
+			? 'на картинке ниже' // "Track on the image below"
+			: (announcement.routeLink || 'нет') // "no" if no track
+
 		return (
 			`📅 ${announcement.date}\n\n` +
 			`🏁 ${announcement.name}\n\n` +
 			`📍 Место сбора: ${announcement.meetingPlace}\n` +
 			`⏰ Старт в ${announcement.startTime}\n` +
-			`🗺 Маршрут ${announcement.routeDistance} км${
-				announcement.routeLink ? ', трек: ' + announcement.routeLink : ''
-			}\n` +
-			`🪫 Зарядки: ${announcement.charges}\n` +
+			`🗺 Маршрут ${announcement.routeDistance} км${announcement.routeLink ? ', трек: ' + trackText : ''}\n` +
+			`🔋 Зарядки: ${announcement.charges}\n` +
 			`🛣 Едем по: ${roadTypes}\n` +
 			`🚀 Скорость: ${speedDisplay} км/ч\n` +
 			`📝 ${announcement.description}\n\n` +

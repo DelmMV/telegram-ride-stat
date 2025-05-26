@@ -1,7 +1,9 @@
-const { Telegraf, Markup, Scenes, session } = require('telegraf')
+const { Telegraf, Scenes, session, Markup } = require('telegraf')
 const config = require('../config/constants')
-const locationService = require('./location')
 const statsService = require('./stats')
+const fs = require('fs')
+const path = require('path')
+const locationService = require('./location')
 const announcementService = require('./announcement')
 const LocalSession = require('telegraf-session-local')
 const createAnnouncementScene = require('../scenes/createAnnouncement')
@@ -275,12 +277,23 @@ class TelegramService {
 			const message = ctx.callbackQuery.message
 			const fullModerationText = message.text
 
+			// Check if there's a track image (in HTML comment format)
+			let trackImageFileName = null
+			const trackImageMatch = fullModerationText.match(/<!-- TRACK_IMAGE:([^\s]+) -->/)
+			if (trackImageMatch) {
+				trackImageFileName = trackImageMatch[1]
+			}
+
 			// Extract voting options from the original message
 			const votingOptionsMatch = fullModerationText.match(
 				/🗳 Варианты для голосования:\n([\s\S]*?)(?=\n\n|$)/
 			)
 			let votingOptions = []
-			let announcementTextToSend = fullModerationText
+			
+			// Remove track image metadata from the text
+			let cleanedText = fullModerationText.replace(/<!-- TRACK_IMAGE:[^\s]+ -->/g, '')
+			
+			let announcementTextToSend = cleanedText
 				.split('\n\n')
 				.slice(1)
 				.join('\n\n') // Default to full text after header
@@ -353,6 +366,29 @@ class TelegramService {
 						parse_mode: 'HTML',
 					}
 				)
+				
+				// Если есть изображение трека, отправляем его после анонса
+				if (trackImageFileName) {
+					try {
+						const imagePath = path.join(__dirname, '../../uploads', trackImageFileName)
+						if (fs.existsSync(imagePath)) {
+							await ctx.telegram.sendPhoto(
+								config.bot.chatId,
+								{ source: fs.readFileSync(imagePath) },
+								{
+									caption: 'Трек к анонсу',  // "Track for the announcement"
+									message_thread_id: config.bot.announcementThreadId,
+								}
+							)
+							console.log('Track image sent to announcement thread')
+						} else {
+							console.error(`Track image file not found: ${imagePath}`)
+						}
+					} catch (imageErr) {
+						console.error('Error sending track image to announcement thread:', imageErr)
+					}
+				}
+				
 				// Затем — голосование, если есть варианты
 				if (votingOptions.length > 0) {
 					await ctx.telegram.sendPoll(

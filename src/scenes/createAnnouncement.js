@@ -1,6 +1,9 @@
 const { Scenes, Markup } = require('telegraf')
 const config = require('../config/constants')
 const announcementService = require('../services/announcement')
+const fs = require('fs')
+const path = require('path')
+const axios = require('axios')
 
 const createAnnouncementScene = new Scenes.BaseScene('create_announcement')
 
@@ -37,21 +40,112 @@ createAnnouncementScene.hears('❌ Отмена', async ctx => {
 	)
 })
 
+// Ensure uploads directory exists
+if (!fs.existsSync(path.join(__dirname, '../../uploads'))) {
+	fs.mkdirSync(path.join(__dirname, '../../uploads'), { recursive: true })
+}
+
+// Helper function to update messages
+const updateMessage = async (ctx, text, keyboard = null) => {
+	try {
+		// Delete old message if it exists
+		if (ctx.scene.state.messageId) {
+			await ctx.telegram.deleteMessage(ctx.chat.id, ctx.scene.state.messageId)
+		}
+		// Send new message
+		const message = await ctx.reply(text, keyboard)
+		ctx.scene.state.messageId = message.message_id
+	} catch (error) {
+		console.error('Error updating message:', error)
+	}
+}
+
+// Helper function to download and save image
+const downloadImage = async (fileId, ctx) => {
+	try {
+		// Get file info from Telegram
+		const fileInfo = await ctx.telegram.getFile(fileId)
+		const fileUrl = `https://api.telegram.org/file/bot${config.bot.token}/${fileInfo.file_path}`
+		
+		// Generate a unique filename
+		const fileName = `track_${Date.now()}_${Math.floor(Math.random() * 10000)}.jpg`
+		const filePath = path.join(__dirname, '../../uploads', fileName)
+		
+		// Download the file
+		const response = await axios({
+			method: 'GET',
+			url: fileUrl,
+			responseType: 'stream'
+		})
+		
+		// Save the file
+		const writer = fs.createWriteStream(filePath)
+		response.data.pipe(writer)
+		
+		return new Promise((resolve, reject) => {
+			writer.on('finish', () => resolve({
+				fileName,
+				filePath
+			}))
+			writer.on('error', reject)
+		})
+	} catch (error) {
+		console.error('Error downloading image:', error)
+		throw error
+	}
+}
+
+// Handle photo uploads for track
+createAnnouncementScene.on('photo', async ctx => {
+	// Only process photos when we're in the routeLink step
+	if (ctx.scene.state.step === 'routeLink') {
+		try {
+			// Get the largest photo from the array
+			const photo = ctx.message.photo[ctx.message.photo.length - 1]
+			const fileId = photo.file_id
+			
+			// Download and save the image
+			const imageInfo = await downloadImage(fileId, ctx)
+			
+			// Store image info in the announcement state
+			ctx.scene.state.announcement.routeLink = 'на картинке ниже' // "Track on the image below"
+			ctx.scene.state.announcement.trackImage = imageInfo
+			
+			// Move to the next step
+			ctx.scene.state.step = 'charges'
+			await updateMessage(ctx,
+				'Дата: ' +
+					ctx.scene.state.announcement.date +
+					'\n' +
+					'Название: ' +
+					ctx.scene.state.announcement.name +
+					'\n' +
+					'Место сбора: ' +
+					ctx.scene.state.announcement.meetingPlace +
+					'\n' +
+					'Время старта: ' +
+					ctx.scene.state.announcement.startTime +
+					'\n' +
+					'Длина маршрута: ' +
+					ctx.scene.state.announcement.routeDistance +
+					' км\n' +
+					'Трек: ' +
+					ctx.scene.state.announcement.routeLink +
+					'\n\n' +
+					'Введите информацию о зарядках:',
+				Markup.keyboard([['❌ Отмена']]).resize()
+			)
+		} catch (error) {
+			console.error('Error processing photo:', error)
+			await ctx.reply('Произошла ошибка при обработке изображения. Пожалуйста, попробуйте еще раз или введите ссылку на трек.')
+		}
+	}
+})
+
 createAnnouncementScene.on('text', async ctx => {
 	const text = ctx.message.text
 
 	// Убираем проверку на отмену из обработчика текста, так как теперь есть отдельный обработчик
-	const updateMessage = async (text, keyboard = null) => {
-		try {
-			// Delete old message
-			await ctx.telegram.deleteMessage(ctx.chat.id, ctx.scene.state.messageId)
-			// Send new message
-			const message = await ctx.reply(text, keyboard)
-			ctx.scene.state.messageId = message.message_id
-		} catch (error) {
-			console.error('Error updating message:', error)
-		}
-	}
 
 	if (!ctx.scene.state.step) {
 		// Date input
@@ -62,14 +156,14 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 		ctx.scene.state.announcement = { date: text }
 		ctx.scene.state.step = 'name'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' + text + '\n\n' + 'Введите название катки:',
 			Markup.keyboard([['❌ Отмена']]).resize()
 		)
 	} else if (ctx.scene.state.step === 'name') {
 		ctx.scene.state.announcement.name = text
 		ctx.scene.state.step = 'meetingPlace'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -82,7 +176,7 @@ createAnnouncementScene.on('text', async ctx => {
 	} else if (ctx.scene.state.step === 'meetingPlace') {
 		ctx.scene.state.announcement.meetingPlace = text
 		ctx.scene.state.step = 'startTime'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -103,7 +197,7 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 		ctx.scene.state.announcement.startTime = text
 		ctx.scene.state.step = 'routeDistance'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -126,7 +220,7 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 		ctx.scene.state.announcement.routeDistance = text
 		ctx.scene.state.step = 'routeLink'
-		await updateMessage(
+		await updateMessage(ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -142,13 +236,14 @@ createAnnouncementScene.on('text', async ctx => {
 				'Длина маршрута: ' +
 				text +
 				' км\n\n' +
-				'Введите ссылку на трек (или отправьте "-" если нет):',
+				'Введите ссылку на трек, загрузите изображение с треком или отправьте "-" если нет трека:',
 			Markup.keyboard([['❌ Отмена']]).resize()
 		)
 	} else if (ctx.scene.state.step === 'routeLink') {
 		ctx.scene.state.announcement.routeLink = text === '-' ? null : text
+		ctx.scene.state.announcement.trackImage = null // No image for text input
 		ctx.scene.state.step = 'charges'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -179,7 +274,7 @@ createAnnouncementScene.on('text', async ctx => {
 			['✅ Готово'],
 			['❌ Отмена'],
 		]).resize()
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -218,7 +313,7 @@ createAnnouncementScene.on('text', async ctx => {
 				.filter(t => t.selected)
 				.map(t => t.name)
 				.join(', ')
-			await updateMessage(
+			await updateMessage(ctx, 
 				'Дата: ' +
 					ctx.scene.state.announcement.date +
 					'\n' +
@@ -288,7 +383,7 @@ createAnnouncementScene.on('text', async ctx => {
 		// Store the validated speed value
 		ctx.scene.state.announcement.speed = speedValue
 		ctx.scene.state.step = 'description'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -332,7 +427,7 @@ createAnnouncementScene.on('text', async ctx => {
 	} else if (ctx.scene.state.step === 'description') {
 		ctx.scene.state.announcement.description = text
 		ctx.scene.state.step = 'additionalOrganizers'
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -392,7 +487,7 @@ createAnnouncementScene.on('text', async ctx => {
 		ctx.scene.state.announcement.votingOptions = []
 		ctx.scene.state.step = 'voting'
 
-		await updateMessage(
+		await updateMessage(ctx, 
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -528,7 +623,7 @@ createAnnouncementScene.on('text', async ctx => {
 							.join('\n')
 					: ''
 
-			await updateMessage(
+			await updateMessage(ctx, 
 				'Дата: ' +
 					ctx.scene.state.announcement.date +
 					'\n' +
@@ -607,7 +702,13 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 					.join('\n')
 			: ''
 
-	const moderationText = `Новый анонс от (тест) @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}`
+	// Add track image metadata if present (hidden from user view)
+	let trackImageMetadata = ''
+	if (ctx.scene.state.announcement.trackImage) {
+		trackImageMetadata = `\n\n<!-- TRACK_IMAGE:${ctx.scene.state.announcement.trackImage.fileName} -->`
+	}
+
+	const moderationText = `Новый анонс от (тест) @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}${trackImageMetadata}`
 
 	console.log('SEND TO MODERATION:', {
 		chatId: config.bot.adminChannelId,
@@ -616,9 +717,11 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 		typeThreadId: typeof config.bot.adminThreadId,
 		moderationText,
 		keyboard,
+		hasTrackImage: !!ctx.scene.state.announcement.trackImage
 	})
 
 	try {
+		// First send the announcement text
 		const res = await ctx.telegram.sendMessage(
 			config.bot.adminChannelId,
 			moderationText,
@@ -628,6 +731,24 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 			}
 		)
 		console.log('MODERATION MESSAGE SENT:', res)
+		
+		// If there's a track image, send it after the announcement
+		if (ctx.scene.state.announcement.trackImage) {
+			try {
+				const imagePath = path.join(__dirname, '../../uploads', ctx.scene.state.announcement.trackImage.fileName)
+				await ctx.telegram.sendPhoto(
+					config.bot.adminChannelId,
+					{ source: fs.readFileSync(imagePath) },
+					{
+						caption: 'Трек к анонсу',  // "Track for the announcement"
+						message_thread_id: Number(config.bot.adminThreadId),
+					}
+				)
+				console.log('TRACK IMAGE SENT')
+			} catch (imageErr) {
+				console.error('ERROR SENDING TRACK IMAGE:', imageErr)
+			}
+		}
 	} catch (err) {
 		console.error('ERROR SENDING MODERATION MESSAGE:', err)
 	}

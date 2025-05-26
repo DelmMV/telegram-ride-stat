@@ -1,6 +1,7 @@
 # IntelliJ project files
 .idea
 #
+uploads/
 node_modules/
 .env
 # macOS
