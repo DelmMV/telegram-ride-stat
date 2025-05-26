@@ -175,7 +175,8 @@ createAnnouncementScene.on('text', async ctx => {
 		ctx.scene.state.step = 'roadTypes'
 		const keyboard = Markup.keyboard([
 			['велодорожки', 'тротуары', 'пч'],
-			['лесные тропы', 'бездорожье', '✅ Готово'],
+			['лесные тропы', 'бездорожье'],
+			['✅ Готово'],
 			['❌ Отмена'],
 		]).resize()
 		await updateMessage(
