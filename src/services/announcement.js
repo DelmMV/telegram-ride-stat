@@ -66,11 +66,11 @@ class AnnouncementService {
 		}
 
 		// Validate speed format
-		const speedRegex = /^\d+-\d+$/
+		const speedRegex = /^\d+-\d+$|^\d+$/
 		if (!speedRegex.test(announcement.speed)) {
 			return {
 				isValid: false,
-				errors: 'Неверный формат скорости. Используйте формат "X-Y"',
+				errors: 'Неверный формат скорости. Используйте формат "X" или "X-Y"',
 			}
 		}
 
@@ -83,7 +83,13 @@ class AnnouncementService {
 			.map(t => t.name)
 			.join(', ')
 
-		const speed = announcement.speed.split('-')
+		// Handle both single number and range formats for speed
+		const speedDisplay = announcement.speed.includes('-')
+			? `от ${announcement.speed.split('-')[0]} до ${
+					announcement.speed.split('-')[1]
+			  }`
+			: announcement.speed
+
 		const organizers = announcement.additionalOrganizers
 			? `@${announcement.organizer}, @${announcement.additionalOrganizers.join(
 					', @'
@@ -100,7 +106,7 @@ class AnnouncementService {
 			}\n` +
 			`🪫 Зарядки: ${announcement.charges}\n` +
 			`🛣 Едем по: ${roadTypes}\n` +
-			`🚀 Скорость: от ${speed[0]} до ${speed[1]} км/ч\n` +
+			`🚀 Скорость: ${speedDisplay} км/ч\n` +
 			`📝 ${announcement.description}\n\n` +
 			`👥 Организаторы: ${organizers}`
 		)
