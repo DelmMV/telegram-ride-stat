@@ -293,60 +293,132 @@ class TelegramService {
 			)
 			let votingOptions = []
 			
-			// Remove track image metadata from the text
-			let cleanedText = fullModerationText.replace(/<!-- TRACK_IMAGE:[^\s]+ -->/g, '')
+			// Извлекаем текст анонса без метаданных
+			// Сначала удаляем все метаданные
+			let cleanedText = fullModerationText
+				.replace(/<!-- TRACK_IMAGE:[^\s]+ -->/g, '')
+				.replace(/<!-- CREATOR_ID:\d+ -->/g, '')
 			
-			let announcementTextToSend = cleanedText
-				.split('\n\n')
-				.slice(1)
-				.join('\n\n') // Default to full text after header
+			// Затем извлекаем текст анонса без заголовка
+			let announcementTextToSend = ''
 
-			if (votingOptionsMatch) {
-				votingOptions = votingOptionsMatch[1]
-					.split('\n')
-					.map(line => line.replace(/^\d+\.\s*/, ''))
-					.filter(option => option.trim())
-
-				// Find the index where the voting options start and take the text before it
-				const votingStartIndex = fullModerationText.indexOf(
-					'🗳 Варианты для голосования:'
-				)
-				if (votingStartIndex !== -1) {
-					// Take the text from after the header up to the start of voting options
-					const headerEndIndex =
-						fullModerationText.indexOf(
-							'\n\n',
-							fullModerationText.indexOf('Новый анонс от @') + 1
-						) + 2
-					if (headerEndIndex < votingStartIndex) {
-						announcementTextToSend = fullModerationText
-							.substring(headerEndIndex, votingStartIndex)
-							.trim()
+			// Извлечение основного текста анонса из сообщения модерации
+			// Находим заголовок "Новый анонс от @username:"
+			const headerMatch = cleanedText.match(/Новый анонс от @\w+:/)
+			if (headerMatch) {
+				// Находим индекс конца заголовка
+				const headerEndIndex = cleanedText.indexOf(headerMatch[0]) + headerMatch[0].length
+				
+				// Извлекаем текст после заголовка
+				let textAfterHeader = cleanedText.substring(headerEndIndex).trim()
+				
+				// Если есть варианты для голосования, отделяем их от основного текста
+				if (votingOptionsMatch) {
+					votingOptions = votingOptionsMatch[1]
+						.split('\n')
+						.map(line => line.replace(/^\d+\.\s*/, ''))
+						.filter(option => option.trim())
+					
+					const votingStartIndex = textAfterHeader.indexOf('🗳 Варианты для голосования:')
+					if (votingStartIndex !== -1) {
+						// Берем текст до начала вариантов голосования
+						announcementTextToSend = textAfterHeader.substring(0, votingStartIndex).trim()
 					} else {
-						// Should not happen if parsing is correct, but as a fallback
-						announcementTextToSend = fullModerationText.split('\n\n')[1].trim() // Take just the first main block
+						// Если не нашли варианты голосования в тексте после заголовка, берем весь текст
+						announcementTextToSend = textAfterHeader
 					}
+				} else {
+					// Если нет вариантов для голосования, берем весь текст после заголовка
+					announcementTextToSend = textAfterHeader
 				}
 			} else {
-				// If no voting options found, just take the main announcement text after the header
-				announcementTextToSend = fullModerationText
-					.split('\n\n')
-					.slice(1)
-					.join('\n\n')
-					.trim()
+				// Если не нашли заголовок, берем текст после первого разделителя \n\n
+				const parts = cleanedText.split('\n\n')
+				if (parts.length > 1) {
+					announcementTextToSend = parts.slice(1).join('\n\n').trim()
+				} else {
+					// Если нет разделителя, берем весь текст
+					announcementTextToSend = cleanedText.trim()
+				}
+				
+				// Если есть варианты для голосования, отделяем их от основного текста
+				if (votingOptionsMatch) {
+					votingOptions = votingOptionsMatch[1]
+						.split('\n')
+						.map(line => line.replace(/^\d+\.\s*/, ''))
+						.filter(option => option.trim())
+					
+					const votingStartIndex = announcementTextToSend.indexOf('🗳 Варианты для голосования:')
+					if (votingStartIndex !== -1) {
+						// Берем текст до начала вариантов голосования
+						announcementTextToSend = announcementTextToSend.substring(0, votingStartIndex).trim()
+					}
+				}
 			}
 
 			// Store moderation message ID for later reference
 			ctx.session.moderationMessageId = ctx.callbackQuery.message.message_id
 
-			// Notify user in private message
-			try {
-				await ctx.telegram.sendMessage(
-					ctx.from.id,
-					'✅ Ваш анонс одобрен и опубликован!'
-				)
-			} catch (error) {
-				console.error('Error sending private message:', error)
+			// Извлекаем userId создателя анонса из метаданных в тексте сообщения
+			let creatorId = null
+			const creatorIdMatch = fullModerationText.match(/<!-- CREATOR_ID:(\d+) -->/)
+			if (creatorIdMatch) {
+				creatorId = creatorIdMatch[1]
+			}
+
+			// Извлекаем username создателя анонса из текста сообщения (для логирования)
+			let creatorUsername = null
+			const creatorMatch = fullModerationText.match(/Новый анонс от @(\w+)/)
+			if (creatorMatch) {
+				creatorUsername = creatorMatch[1]
+			}
+
+			// Отправляем личное сообщение создателю анонса
+			if (creatorId) {
+				try {
+					// Отправляем личное сообщение создателю анонса, используя его userId
+					await ctx.telegram.sendMessage(
+						creatorId,
+						'✅ Ваш анонс одобрен и опубликован!'
+					)
+					console.log(`Notification sent to creator (ID: ${creatorId}, username: @${creatorUsername || 'unknown'})`)
+				} catch (error) {
+					console.error(`Error sending private message to creator (ID: ${creatorId}):`, error)
+					
+					// Если не удалось отправить личное сообщение, пробуем отправить в общий чат с упоминанием
+					if (creatorUsername) {
+						try {
+							await ctx.telegram.sendMessage(
+								config.bot.chatId,
+								`@${creatorUsername}, ✅ Ваш анонс одобрен и опубликован!`,
+								{
+									message_thread_id: config.bot.announcementThreadId
+								}
+							)
+							console.log(`Fallback notification sent to @${creatorUsername} in the main chat`)
+						} catch (fallbackError) {
+							console.error('Error sending fallback notification:', fallbackError)
+						}
+					}
+				}
+			} else {
+				console.warn('Creator ID not found in the announcement metadata')
+				
+				// Если не нашли ID, но есть username, пробуем отправить в общий чат с упоминанием
+				if (creatorUsername) {
+					try {
+						await ctx.telegram.sendMessage(
+							config.bot.chatId,
+							`@${creatorUsername}, ✅ Ваш анонс одобрен и опубликован!`,
+							{
+								message_thread_id: config.bot.announcementThreadId
+							}
+						)
+						console.log(`Fallback notification sent to @${creatorUsername} in the main chat`)
+					} catch (fallbackError) {
+						console.error('Error sending fallback notification:', fallbackError)
+					}
+				}
 			}
 
 			// Repost announcement to main chat in specified thread with HTML escaping
@@ -419,24 +491,32 @@ class TelegramService {
 
 		this.bot.action('reject_announcement', async ctx => {
 			const message = ctx.callbackQuery.message
-			let username = null
+			const fullModerationText = message.text
 
-			// Сначала ищем username после 'от', допускаем любые символы между 'от' и '@'
-			let usernameMatch = message.text.match(/от[^@\n]*@(\w+)/)
-			if (usernameMatch) {
-				username = usernameMatch[1]
+			// Извлекаем userId создателя анонса из метаданных в тексте сообщения
+			let creatorId = null
+			const creatorIdMatch = fullModerationText.match(/<!-- CREATOR_ID:(\d+) -->/)
+			if (creatorIdMatch) {
+				creatorId = creatorIdMatch[1]
+			}
+
+			// Извлекаем username создателя анонса из текста сообщения
+			let creatorUsername = null
+			const creatorMatch = fullModerationText.match(/Новый анонс от @(\w+)/)
+			if (creatorMatch) {
+				creatorUsername = creatorMatch[1]
 			} else {
 				// Пробуем найти в строке Организаторы
-				usernameMatch = message.text.match(/Организаторы: @(\w+)/)
-				if (usernameMatch) {
-					username = usernameMatch[1]
+				const organizerMatch = fullModerationText.match(/Организаторы: @(\w+)/)
+				if (organizerMatch) {
+					creatorUsername = organizerMatch[1]
 				}
 			}
 
-			if (!username) {
+			if (!creatorUsername && !creatorId) {
 				console.warn(
-					'Не удалось извлечь username из текста сообщения:',
-					message.text
+					'Не удалось извлечь информацию о создателе анонса из текста сообщения:',
+					fullModerationText
 				)
 			}
 
@@ -448,24 +528,50 @@ class TelegramService {
 				adminName = `@${adminName}`
 			}
 
-			// Send rejection notification in private message, если username найден
-			if (username) {
+			// Отправляем личное сообщение создателю анонса
+			if (creatorId) {
 				try {
-					// Получаем userId автора анонса через username (если возможно)
-					// Здесь предполагается, что есть способ получить userId по username, иначе отправить нельзя
-					// Для Telegraf напрямую нельзя, если только не хранить userId при создании анонса
-					// Пока отправляем админу (ctx.from.id) как раньше, но в реальном боте нужен userId автора
+					// Отправляем личное сообщение создателю анонса, используя его userId
 					await ctx.telegram.sendMessage(
-						ctx.from.id,
+						creatorId,
 						`❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`
 					)
+					console.log(`Rejection notification sent to creator (ID: ${creatorId}, username: @${creatorUsername || 'unknown'})`)
 				} catch (error) {
-					console.error('Error sending private message:', error)
+					console.error(`Error sending private message to creator (ID: ${creatorId}):`, error)
+					
+					// Если не удалось отправить личное сообщение, пробуем отправить в общий чат с упоминанием
+					if (creatorUsername) {
+						try {
+							await ctx.telegram.sendMessage(
+								config.bot.chatId,
+								`@${creatorUsername}, ❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`,
+								{
+									message_thread_id: config.bot.announcementThreadId
+								}
+							)
+							console.log(`Fallback rejection notification sent to @${creatorUsername} in the main chat`)
+						} catch (fallbackError) {
+							console.error('Error sending fallback rejection notification:', fallbackError)
+						}
+					}
+				}
+			} else if (creatorUsername) {
+				// Если нет userId, но есть username, отправляем сообщение в общий чат с упоминанием
+				try {
+					await ctx.telegram.sendMessage(
+						config.bot.chatId,
+						`@${creatorUsername}, ❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`,
+						{
+							message_thread_id: config.bot.announcementThreadId
+						}
+					)
+					console.log(`Fallback rejection notification sent to @${creatorUsername} in the main chat`)
+				} catch (error) {
+					console.error('Error sending rejection notification to chat:', error)
 				}
 			} else {
-				console.warn(
-					'Пропущено отправление личного сообщения из-за отсутствия username.'
-				)
+				console.warn('Пропущено отправление уведомления из-за отсутствия информации о создателе анонса')
 			}
 
 			await ctx.editMessageText(`${message.text}\n\n❌ Анонс отклонен`, {

@@ -708,7 +708,10 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 		trackImageMetadata = `\n\n<!-- TRACK_IMAGE:${ctx.scene.state.announcement.trackImage.fileName} -->`
 	}
 
-	const moderationText = `Новый анонс от @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}${trackImageMetadata}`
+	// Add creator userId metadata (hidden from user view)
+	const creatorMetadata = `\n\n<!-- CREATOR_ID:${ctx.from.id} -->`
+
+	const moderationText = `Новый анонс от @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}${trackImageMetadata}${creatorMetadata}`
 
 	console.log('SEND TO MODERATION:', {
 		chatId: config.bot.adminChannelId,
