@@ -99,7 +99,7 @@ class AnnouncementService {
 		// Check if the track is provided as an image
 		const hasTrackImage = announcement.trackImage !== undefined && announcement.trackImage !== null
 		const trackText = hasTrackImage
-			? 'на картинке ниже' // "Track on the image below"
+			? 'на картинке' // "Track on the image below"
 			: (announcement.routeLink || 'нет') // "no" if no track
 
 		return (

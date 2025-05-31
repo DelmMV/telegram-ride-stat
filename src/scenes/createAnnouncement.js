@@ -108,7 +108,7 @@ createAnnouncementScene.on('photo', async ctx => {
 			const imageInfo = await downloadImage(fileId, ctx)
 			
 			// Store image info in the announcement state
-			ctx.scene.state.announcement.routeLink = 'на картинке ниже' // "Track on the image below"
+			ctx.scene.state.announcement.routeLink = 'на картинке' // "Track on the image below"
 			ctx.scene.state.announcement.trackImage = imageInfo
 			
 			// Move to the next step
@@ -709,13 +709,13 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 		trackImageMetadata = `\n\n<!-- TRACK_IMAGE:${ctx.scene.state.announcement.trackImage.fileName} -->`
 		
 		// Также добавляем видимую информацию о треке в текст анонса
-		if (!ctx.scene.state.formattedAnnouncementFinal.includes('трек: на картинке ниже')) {
+		if (!ctx.scene.state.formattedAnnouncementFinal.includes('трек: на картинке')) {
 			// Ищем строку с маршрутом
 			const routeRegex = /(🗺 Маршрут .+?)(\n|$)/
 			if (routeRegex.test(ctx.scene.state.formattedAnnouncementFinal)) {
 				ctx.scene.state.formattedAnnouncementFinal = ctx.scene.state.formattedAnnouncementFinal.replace(
 					routeRegex,
-					'$1, трек: на картинке ниже$2'
+					'$1, трек: на картинке$2'
 				)
 			}
 		}
