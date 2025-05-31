@@ -705,7 +705,20 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 	// Add track image metadata if present (hidden from user view)
 	let trackImageMetadata = ''
 	if (ctx.scene.state.announcement.trackImage) {
+		// Добавляем метаданные в HTML-комментарий для обработки при одобрении
 		trackImageMetadata = `\n\n<!-- TRACK_IMAGE:${ctx.scene.state.announcement.trackImage.fileName} -->`
+		
+		// Также добавляем видимую информацию о треке в текст анонса
+		if (!ctx.scene.state.formattedAnnouncementFinal.includes('трек: на картинке ниже')) {
+			// Ищем строку с маршрутом
+			const routeRegex = /(🗺 Маршрут .+?)(\n|$)/
+			if (routeRegex.test(ctx.scene.state.formattedAnnouncementFinal)) {
+				ctx.scene.state.formattedAnnouncementFinal = ctx.scene.state.formattedAnnouncementFinal.replace(
+					routeRegex,
+					'$1, трек: на картинке ниже$2'
+				)
+			}
+		}
 	}
 
 	// Add creator userId metadata (hidden from user view)
@@ -724,7 +737,7 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 	})
 
 	try {
-		// First send the announcement text
+		// Сначала отправляем текст анонса
 		const res = await ctx.telegram.sendMessage(
 			config.bot.adminChannelId,
 			moderationText,
@@ -733,24 +746,45 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 				message_thread_id: Number(config.bot.adminThreadId),
 			}
 		)
-		console.log('MODERATION MESSAGE SENT:', res)
+		console.log('ANNOUNCEMENT TEXT SENT:', res)
 		
-		// If there's a track image, send it after the announcement
+		// Если есть картинка трека, отправляем ее отдельным сообщением
 		if (ctx.scene.state.announcement.trackImage) {
 			try {
 				const imagePath = path.join(__dirname, '../../uploads', ctx.scene.state.announcement.trackImage.fileName)
-				await ctx.telegram.sendPhoto(
+				const photoRes = await ctx.telegram.sendPhoto(
 					config.bot.adminChannelId,
 					{ source: fs.readFileSync(imagePath) },
 					{
-						caption: 'Трек к анонсу',  // "Track for the announcement"
+						caption: 'Трек для анонса',
 						message_thread_id: Number(config.bot.adminThreadId),
 					}
 				)
-				console.log('TRACK IMAGE SENT')
+				console.log('TRACK IMAGE SENT:', photoRes)
 			} catch (imageErr) {
-				console.error('ERROR SENDING TRACK IMAGE:', imageErr)
+				console.error('ERROR SENDING ANNOUNCEMENT WITH TRACK IMAGE:', imageErr)
+				// Если не удалось отправить с картинкой, отправляем только текст
+				const res = await ctx.telegram.sendMessage(
+					config.bot.adminChannelId,
+					moderationText,
+					{
+						...keyboard,
+						message_thread_id: Number(config.bot.adminThreadId),
+					}
+				)
+				console.log('FALLBACK: MODERATION MESSAGE SENT WITHOUT IMAGE:', res)
 			}
+		} else {
+			// Если картинки нет, отправляем только текст анонса
+			const res = await ctx.telegram.sendMessage(
+				config.bot.adminChannelId,
+				moderationText,
+				{
+					...keyboard,
+					message_thread_id: Number(config.bot.adminThreadId),
+				}
+			)
+			console.log('MODERATION MESSAGE SENT:', res)
 		}
 	} catch (err) {
 		console.error('ERROR SENDING MODERATION MESSAGE:', err)

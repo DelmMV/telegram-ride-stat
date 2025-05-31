@@ -278,13 +278,41 @@ class TelegramService {
 		// Handle admin moderation callbacks
 		this.bot.action('approve_announcement', async ctx => {
 			const message = ctx.callbackQuery.message
+			console.log('APPROVE ANNOUNCEMENT MESSAGE:', JSON.stringify(message, null, 2))
+			
+			// Получаем текст сообщения модерации
 			const fullModerationText = message.text
-
-			// Check if there's a track image (in HTML comment format)
+			console.log('FULL MODERATION TEXT:', fullModerationText)
+			
+			// Проверяем, есть ли метаданные о треке в тексте
 			let trackImageFileName = null
+			let photoFileId = null
+			
+			// Проверяем метаданные в тексте
 			const trackImageMatch = fullModerationText.match(/<!-- TRACK_IMAGE:([^\s]+) -->/)
 			if (trackImageMatch) {
 				trackImageFileName = trackImageMatch[1]
+				console.log('TRACK IMAGE FILE NAME FROM TEXT METADATA:', trackImageFileName)
+			}
+			
+			// В Telegraf API нет прямого метода для получения соседних сообщений
+			// Вместо этого мы будем использовать данные из метаданных в тексте анонса
+			// И если есть метаданные о файле трека, будем искать файл на диске
+			
+			// Если есть имя файла трека в метаданных, проверяем его наличие на диске
+			if (trackImageFileName) {
+				try {
+					const imagePath = path.join(__dirname, '../../uploads', trackImageFileName)
+					if (fs.existsSync(imagePath)) {
+						console.log('TRACK IMAGE FILE FOUND ON DISK:', imagePath)
+					} else {
+						console.error('TRACK IMAGE FILE NOT FOUND ON DISK:', imagePath)
+						trackImageFileName = null // Сбрасываем, если файл не найден
+					}
+				} catch (err) {
+					console.error('ERROR CHECKING TRACK IMAGE FILE:', err)
+					trackImageFileName = null
+				}
 			}
 
 			// Extract voting options from the original message
@@ -432,36 +460,60 @@ class TelegramService {
 			}
 
 			try {
-				// Сначала отправляем анонс
-				await ctx.telegram.sendMessage(
-					config.bot.chatId,
-					escapeHTML(announcementTextToSend),
-					{
-						message_thread_id: config.bot.announcementThreadId,
-						parse_mode: 'HTML',
-					}
-				)
-				
-				// Если есть изображение трека, отправляем его после анонса
+				// Если есть изображение трека, отправляем анонс с фото
 				if (trackImageFileName) {
 					try {
+						// Ищем файл на диске
 						const imagePath = path.join(__dirname, '../../uploads', trackImageFileName)
 						if (fs.existsSync(imagePath)) {
+							// Отправляем фото с текстом анонса в подписи
 							await ctx.telegram.sendPhoto(
 								config.bot.chatId,
 								{ source: fs.readFileSync(imagePath) },
 								{
-									caption: 'Трек к анонсу',  // "Track for the announcement"
+									caption: escapeHTML(announcementTextToSend),
 									message_thread_id: config.bot.announcementThreadId,
+									parse_mode: 'HTML',
 								}
 							)
-							console.log('Track image sent to announcement thread')
+							console.log('Announcement with track image sent to announcement thread (using file)')
 						} else {
 							console.error(`Track image file not found: ${imagePath}`)
+							// Если файл не найден, отправляем только текст анонса
+							await ctx.telegram.sendMessage(
+								config.bot.chatId,
+								escapeHTML(announcementTextToSend),
+								{
+									message_thread_id: config.bot.announcementThreadId,
+									parse_mode: 'HTML',
+								}
+							)
+							console.log('Fallback: Announcement text sent without image')
 						}
 					} catch (imageErr) {
-						console.error('Error sending track image to announcement thread:', imageErr)
+						console.error('Error sending announcement with track image:', imageErr)
+						// Если произошла ошибка при отправке фото, отправляем только текст
+						await ctx.telegram.sendMessage(
+							config.bot.chatId,
+							escapeHTML(announcementTextToSend),
+							{
+								message_thread_id: config.bot.announcementThreadId,
+								parse_mode: 'HTML',
+							}
+						)
+						console.log('Fallback: Announcement text sent without image due to error')
 					}
+				} else {
+					// Если нет изображения трека, отправляем только текст анонса
+					await ctx.telegram.sendMessage(
+						config.bot.chatId,
+						escapeHTML(announcementTextToSend),
+						{
+							message_thread_id: config.bot.announcementThreadId,
+							parse_mode: 'HTML',
+						}
+					)
+					console.log('Announcement text sent to announcement thread')
 				}
 				
 				// Затем — голосование, если есть варианты
