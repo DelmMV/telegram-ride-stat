@@ -34,9 +34,21 @@ class TelegramService {
 			const photos = await pRetry(
 				async () => {
 					try {
-						return await this.bot.telegram.getUserProfilePhotos(userId, 0, 1)
+						const timeoutPromise = new Promise((_, reject) => {
+							setTimeout(() => reject(new Error('Operation timed out')), 30000)
+						})
+						const photosPromise = this.bot.telegram.getUserProfilePhotos(
+							userId,
+							0,
+							1
+						)
+						return await Promise.race([photosPromise, timeoutPromise])
 					} catch (error) {
-						if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+						if (
+							error.code === 'ETIMEDOUT' ||
+							error.code === 'ECONNRESET' ||
+							error.message === 'Operation timed out'
+						) {
 							throw new pRetry.AbortError(error)
 						}
 						throw error
@@ -49,6 +61,9 @@ class TelegramService {
 							`Попытка ${error.attemptNumber} получения фото профиля не удалась. Осталось попыток: ${error.retriesLeft}`
 						)
 					},
+					factor: 2,
+					minTimeout: 1000,
+					maxTimeout: 10000,
 				}
 			)
 
@@ -57,9 +72,20 @@ class TelegramService {
 				const file = await pRetry(
 					async () => {
 						try {
-							return await this.bot.telegram.getFile(fileId)
+							const timeoutPromise = new Promise((_, reject) => {
+								setTimeout(
+									() => reject(new Error('Operation timed out')),
+									30000
+								)
+							})
+							const filePromise = this.bot.telegram.getFile(fileId)
+							return await Promise.race([filePromise, timeoutPromise])
 						} catch (error) {
-							if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+							if (
+								error.code === 'ETIMEDOUT' ||
+								error.code === 'ECONNRESET' ||
+								error.message === 'Operation timed out'
+							) {
 								throw new pRetry.AbortError(error)
 							}
 							throw error
@@ -72,12 +98,16 @@ class TelegramService {
 								`Попытка ${error.attemptNumber} получения файла не удалась. Осталось попыток: ${error.retriesLeft}`
 							)
 						},
+						factor: 2,
+						minTimeout: 1000,
+						maxTimeout: 10000,
 					}
 				)
 				return `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`
 			}
 		} catch (error) {
 			console.error('Ошибка при получении аватарки пользователя:', error)
+			// Не выбрасываем ошибку дальше, чтобы бот продолжал работать
 		}
 		return null
 	}
@@ -278,31 +308,43 @@ class TelegramService {
 		// Handle admin moderation callbacks
 		this.bot.action('approve_announcement', async ctx => {
 			const message = ctx.callbackQuery.message
-			console.log('APPROVE ANNOUNCEMENT MESSAGE:', JSON.stringify(message, null, 2))
-			
+			console.log(
+				'APPROVE ANNOUNCEMENT MESSAGE:',
+				JSON.stringify(message, null, 2)
+			)
+
 			// Получаем текст сообщения модерации
 			const fullModerationText = message.text
 			console.log('FULL MODERATION TEXT:', fullModerationText)
-			
+
 			// Проверяем, есть ли метаданные о треке в тексте
 			let trackImageFileName = null
 			let photoFileId = null
-			
+
 			// Проверяем метаданные в тексте
-			const trackImageMatch = fullModerationText.match(/<!-- TRACK_IMAGE:([^\s]+) -->/)
+			const trackImageMatch = fullModerationText.match(
+				/<!-- TRACK_IMAGE:([^\s]+) -->/
+			)
 			if (trackImageMatch) {
 				trackImageFileName = trackImageMatch[1]
-				console.log('TRACK IMAGE FILE NAME FROM TEXT METADATA:', trackImageFileName)
+				console.log(
+					'TRACK IMAGE FILE NAME FROM TEXT METADATA:',
+					trackImageFileName
+				)
 			}
-			
+
 			// В Telegraf API нет прямого метода для получения соседних сообщений
 			// Вместо этого мы будем использовать данные из метаданных в тексте анонса
 			// И если есть метаданные о файле трека, будем искать файл на диске
-			
+
 			// Если есть имя файла трека в метаданных, проверяем его наличие на диске
 			if (trackImageFileName) {
 				try {
-					const imagePath = path.join(__dirname, '../../uploads', trackImageFileName)
+					const imagePath = path.join(
+						__dirname,
+						'../../uploads',
+						trackImageFileName
+					)
 					if (fs.existsSync(imagePath)) {
 						console.log('TRACK IMAGE FILE FOUND ON DISK:', imagePath)
 					} else {
@@ -320,13 +362,13 @@ class TelegramService {
 				/🗳 Варианты для голосования:\n([\s\S]*?)(?=\n\n|$)/
 			)
 			let votingOptions = []
-			
+
 			// Извлекаем текст анонса без метаданных
 			// Сначала удаляем все метаданные
 			let cleanedText = fullModerationText
 				.replace(/<!-- TRACK_IMAGE:[^\s]+ -->/g, '')
 				.replace(/<!-- CREATOR_ID:\d+ -->/g, '')
-			
+
 			// Затем извлекаем текст анонса без заголовка
 			let announcementTextToSend = ''
 
@@ -335,22 +377,27 @@ class TelegramService {
 			const headerMatch = cleanedText.match(/Новый анонс от @\w+:/)
 			if (headerMatch) {
 				// Находим индекс конца заголовка
-				const headerEndIndex = cleanedText.indexOf(headerMatch[0]) + headerMatch[0].length
-				
+				const headerEndIndex =
+					cleanedText.indexOf(headerMatch[0]) + headerMatch[0].length
+
 				// Извлекаем текст после заголовка
 				let textAfterHeader = cleanedText.substring(headerEndIndex).trim()
-				
+
 				// Если есть варианты для голосования, отделяем их от основного текста
 				if (votingOptionsMatch) {
 					votingOptions = votingOptionsMatch[1]
 						.split('\n')
 						.map(line => line.replace(/^\d+\.\s*/, ''))
 						.filter(option => option.trim())
-					
-					const votingStartIndex = textAfterHeader.indexOf('🗳 Варианты для голосования:')
+
+					const votingStartIndex = textAfterHeader.indexOf(
+						'🗳 Варианты для голосования:'
+					)
 					if (votingStartIndex !== -1) {
 						// Берем текст до начала вариантов голосования
-						announcementTextToSend = textAfterHeader.substring(0, votingStartIndex).trim()
+						announcementTextToSend = textAfterHeader
+							.substring(0, votingStartIndex)
+							.trim()
 					} else {
 						// Если не нашли варианты голосования в тексте после заголовка, берем весь текст
 						announcementTextToSend = textAfterHeader
@@ -368,18 +415,22 @@ class TelegramService {
 					// Если нет разделителя, берем весь текст
 					announcementTextToSend = cleanedText.trim()
 				}
-				
+
 				// Если есть варианты для голосования, отделяем их от основного текста
 				if (votingOptionsMatch) {
 					votingOptions = votingOptionsMatch[1]
 						.split('\n')
 						.map(line => line.replace(/^\d+\.\s*/, ''))
 						.filter(option => option.trim())
-					
-					const votingStartIndex = announcementTextToSend.indexOf('🗳 Варианты для голосования:')
+
+					const votingStartIndex = announcementTextToSend.indexOf(
+						'🗳 Варианты для голосования:'
+					)
 					if (votingStartIndex !== -1) {
 						// Берем текст до начала вариантов голосования
-						announcementTextToSend = announcementTextToSend.substring(0, votingStartIndex).trim()
+						announcementTextToSend = announcementTextToSend
+							.substring(0, votingStartIndex)
+							.trim()
 					}
 				}
 			}
@@ -389,7 +440,9 @@ class TelegramService {
 
 			// Извлекаем userId создателя анонса из метаданных в тексте сообщения
 			let creatorId = null
-			const creatorIdMatch = fullModerationText.match(/<!-- CREATOR_ID:(\d+) -->/)
+			const creatorIdMatch = fullModerationText.match(
+				/<!-- CREATOR_ID:(\d+) -->/
+			)
 			if (creatorIdMatch) {
 				creatorId = creatorIdMatch[1]
 			}
@@ -409,10 +462,17 @@ class TelegramService {
 						creatorId,
 						'✅ Ваш анонс одобрен и опубликован!'
 					)
-					console.log(`Notification sent to creator (ID: ${creatorId}, username: @${creatorUsername || 'unknown'})`)
+					console.log(
+						`Notification sent to creator (ID: ${creatorId}, username: @${
+							creatorUsername || 'unknown'
+						})`
+					)
 				} catch (error) {
-					console.error(`Error sending private message to creator (ID: ${creatorId}):`, error)
-					
+					console.error(
+						`Error sending private message to creator (ID: ${creatorId}):`,
+						error
+					)
+
 					// Если не удалось отправить личное сообщение, пробуем отправить в общий чат с упоминанием
 					if (creatorUsername) {
 						try {
@@ -420,18 +480,23 @@ class TelegramService {
 								config.bot.chatId,
 								`@${creatorUsername}, ✅ Ваш анонс одобрен и опубликован!`,
 								{
-									message_thread_id: config.bot.announcementThreadId
+									message_thread_id: config.bot.announcementThreadId,
 								}
 							)
-							console.log(`Fallback notification sent to @${creatorUsername} in the main chat`)
+							console.log(
+								`Fallback notification sent to @${creatorUsername} in the main chat`
+							)
 						} catch (fallbackError) {
-							console.error('Error sending fallback notification:', fallbackError)
+							console.error(
+								'Error sending fallback notification:',
+								fallbackError
+							)
 						}
 					}
 				}
 			} else {
 				console.warn('Creator ID not found in the announcement metadata')
-				
+
 				// Если не нашли ID, но есть username, пробуем отправить в общий чат с упоминанием
 				if (creatorUsername) {
 					try {
@@ -439,10 +504,12 @@ class TelegramService {
 							config.bot.chatId,
 							`@${creatorUsername}, ✅ Ваш анонс одобрен и опубликован!`,
 							{
-								message_thread_id: config.bot.announcementThreadId
+								message_thread_id: config.bot.announcementThreadId,
 							}
 						)
-						console.log(`Fallback notification sent to @${creatorUsername} in the main chat`)
+						console.log(
+							`Fallback notification sent to @${creatorUsername} in the main chat`
+						)
 					} catch (fallbackError) {
 						console.error('Error sending fallback notification:', fallbackError)
 					}
@@ -464,7 +531,11 @@ class TelegramService {
 				if (trackImageFileName) {
 					try {
 						// Ищем файл на диске
-						const imagePath = path.join(__dirname, '../../uploads', trackImageFileName)
+						const imagePath = path.join(
+							__dirname,
+							'../../uploads',
+							trackImageFileName
+						)
 						if (fs.existsSync(imagePath)) {
 							// Отправляем фото с текстом анонса в подписи
 							await ctx.telegram.sendPhoto(
@@ -476,7 +547,9 @@ class TelegramService {
 									parse_mode: 'HTML',
 								}
 							)
-							console.log('Announcement with track image sent to announcement thread (using file)')
+							console.log(
+								'Announcement with track image sent to announcement thread (using file)'
+							)
 						} else {
 							console.error(`Track image file not found: ${imagePath}`)
 							// Если файл не найден, отправляем только текст анонса
@@ -491,7 +564,10 @@ class TelegramService {
 							console.log('Fallback: Announcement text sent without image')
 						}
 					} catch (imageErr) {
-						console.error('Error sending announcement with track image:', imageErr)
+						console.error(
+							'Error sending announcement with track image:',
+							imageErr
+						)
 						// Если произошла ошибка при отправке фото, отправляем только текст
 						await ctx.telegram.sendMessage(
 							config.bot.chatId,
@@ -501,7 +577,9 @@ class TelegramService {
 								parse_mode: 'HTML',
 							}
 						)
-						console.log('Fallback: Announcement text sent without image due to error')
+						console.log(
+							'Fallback: Announcement text sent without image due to error'
+						)
 					}
 				} else {
 					// Если нет изображения трека, отправляем только текст анонса
@@ -515,7 +593,7 @@ class TelegramService {
 					)
 					console.log('Announcement text sent to announcement thread')
 				}
-				
+
 				// Затем — голосование, если есть варианты
 				if (votingOptions.length > 0) {
 					await ctx.telegram.sendPoll(
@@ -547,7 +625,9 @@ class TelegramService {
 
 			// Извлекаем userId создателя анонса из метаданных в тексте сообщения
 			let creatorId = null
-			const creatorIdMatch = fullModerationText.match(/<!-- CREATOR_ID:(\d+) -->/)
+			const creatorIdMatch = fullModerationText.match(
+				/<!-- CREATOR_ID:(\d+) -->/
+			)
 			if (creatorIdMatch) {
 				creatorId = creatorIdMatch[1]
 			}
@@ -588,10 +668,17 @@ class TelegramService {
 						creatorId,
 						`❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`
 					)
-					console.log(`Rejection notification sent to creator (ID: ${creatorId}, username: @${creatorUsername || 'unknown'})`)
+					console.log(
+						`Rejection notification sent to creator (ID: ${creatorId}, username: @${
+							creatorUsername || 'unknown'
+						})`
+					)
 				} catch (error) {
-					console.error(`Error sending private message to creator (ID: ${creatorId}):`, error)
-					
+					console.error(
+						`Error sending private message to creator (ID: ${creatorId}):`,
+						error
+					)
+
 					// Если не удалось отправить личное сообщение, пробуем отправить в общий чат с упоминанием
 					if (creatorUsername) {
 						try {
@@ -599,12 +686,17 @@ class TelegramService {
 								config.bot.chatId,
 								`@${creatorUsername}, ❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`,
 								{
-									message_thread_id: config.bot.announcementThreadId
+									message_thread_id: config.bot.announcementThreadId,
 								}
 							)
-							console.log(`Fallback rejection notification sent to @${creatorUsername} in the main chat`)
+							console.log(
+								`Fallback rejection notification sent to @${creatorUsername} in the main chat`
+							)
 						} catch (fallbackError) {
-							console.error('Error sending fallback rejection notification:', fallbackError)
+							console.error(
+								'Error sending fallback rejection notification:',
+								fallbackError
+							)
 						}
 					}
 				}
@@ -615,15 +707,19 @@ class TelegramService {
 						config.bot.chatId,
 						`@${creatorUsername}, ❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`,
 						{
-							message_thread_id: config.bot.announcementThreadId
+							message_thread_id: config.bot.announcementThreadId,
 						}
 					)
-					console.log(`Fallback rejection notification sent to @${creatorUsername} in the main chat`)
+					console.log(
+						`Fallback rejection notification sent to @${creatorUsername} in the main chat`
+					)
 				} catch (error) {
 					console.error('Error sending rejection notification to chat:', error)
 				}
 			} else {
-				console.warn('Пропущено отправление уведомления из-за отсутствия информации о создателе анонса')
+				console.warn(
+					'Пропущено отправление уведомления из-за отсутствия информации о создателе анонса'
+				)
 			}
 
 			await ctx.editMessageText(`${message.text}\n\n❌ Анонс отклонен`, {
@@ -819,51 +915,85 @@ class TelegramService {
 
 		this.bot.on('edited_message', async ctx => {
 			if (ctx.editedMessage.location) {
-				const location = ctx.editedMessage.location
-				const userId = ctx.editedMessage.from.id
-				const timestamp = ctx.editedMessage.edit_date
-				const username = ctx.editedMessage.from.username
-					? `@${ctx.editedMessage.from.username}`
-					: ctx.editedMessage.from.first_name
-					? ctx.editedMessage.from.first_name
-					: ctx.editedMessage.from.last_name
-				const message = ctx.editedMessage
+				const startTime = Date.now()
+				try {
+					const location = ctx.editedMessage.location
+					const userId = ctx.editedMessage.from.id
+					const timestamp = ctx.editedMessage.edit_date
+					const username = ctx.editedMessage.from.username
+						? `@${ctx.editedMessage.from.username}`
+						: ctx.editedMessage.from.first_name
+						? ctx.editedMessage.from.first_name
+						: ctx.editedMessage.from.last_name
+					const message = ctx.editedMessage
 
-				if (
-					message.chat.id.toString() !== config.bot.chatId ||
-					message.message_thread_id?.toString() !== config.bot.messageThreadId
-				) {
-					return
-				}
-
-				const avatarUrl = await this.getUserAvatarUrl(userId)
-
-				if (message?.location) {
-					const { chat, message_id: messageId } = message
-
-					const existingLocation = this.activeLocations.get(messageId) || {
-						messages: [],
+					if (
+						message.chat.id.toString() !== config.bot.chatId ||
+						message.message_thread_id?.toString() !== config.bot.messageThreadId
+					) {
+						return
 					}
-					this.activeLocations.set(messageId, {
-						...existingLocation,
-						chatId: chat.id,
-						lastUpdate: Date.now(),
-						userId,
-						username,
-						latitude: location.latitude,
-						longitude: location.longitude,
-						timestamp: timestamp * 1000,
-					})
-				}
 
-				await locationService.processLocation(
-					userId,
-					username,
-					timestamp,
-					location.latitude,
-					location.longitude,
-					avatarUrl
-				)
+					let avatarUrl = null
+					try {
+						// Ограничиваем время получения аватарки 5 секундами
+						avatarUrl = await Promise.race([
+							this.getUserAvatarUrl(userId),
+							new Promise(resolve => setTimeout(() => resolve(null), 5000)),
+						])
+					} catch (avatarErr) {
+						console.error('Ошибка получения аватарки пользователя:', avatarErr)
+						avatarUrl = null
+					}
+
+					if (message?.location) {
+						const { chat, message_id: messageId } = message
+
+						const existingLocation = this.activeLocations.get(messageId) || {
+							messages: [],
+						}
+						this.activeLocations.set(messageId, {
+							...existingLocation,
+							chatId: chat.id,
+							lastUpdate: Date.now(),
+							userId,
+							username,
+							latitude: location.latitude,
+							longitude: location.longitude,
+							timestamp: timestamp * 1000,
+						})
+					}
+
+					const processStart = Date.now()
+					try {
+						await Promise.race([
+							locationService.processLocation(
+								userId,
+								username,
+								timestamp,
+								location.latitude,
+								location.longitude,
+								avatarUrl
+							),
+							new Promise((_, reject) =>
+								setTimeout(
+									() => reject(new Error('processLocation timeout')),
+									10000
+								)
+							),
+						])
+					} catch (dbErr) {
+						console.error('Ошибка при сохранении локации:', dbErr)
+					}
+					const processEnd = Date.now()
+					console.log(
+						`[edited_message] userId=${userId} обработан за ${
+							processEnd - startTime
+						} мс (processLocation: ${processEnd - processStart} мс)`
+					)
+				} catch (err) {
+					console.error('Ошибка в обработчике edited_message:', err)
+				}
 			}
 		})
 
@@ -988,6 +1118,11 @@ class TelegramService {
 	}
 
 	start() {
+		// Глобальный обработчик необработанных ошибок
+		process.on('unhandledRejection', error => {
+			console.error('Unhandled promise rejection:', error)
+			// Не завершаем процесс, позволяем боту продолжить работу
+		})
 		// Create stage with scenes
 		const stage = new Scenes.Stage([createAnnouncementScene])
 		this.bot.use(stage.middleware())
