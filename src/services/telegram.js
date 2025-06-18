@@ -297,6 +297,28 @@ class TelegramService {
 			)
 		})
 
+		// Команда для получения информации о сообщении
+		this.bot.command('info', async ctx => {
+			if (!ctx.message.reply_to_message) {
+				await ctx.reply(
+					'Ответьте этой командой на сообщение, чтобы получить информацию о нём'
+				)
+				return
+			}
+
+			const messageInfo = {
+				chat_id: ctx.chat.id,
+				message_id: ctx.message.reply_to_message.message_id,
+				thread_id: ctx.message.reply_to_message.message_thread_id,
+				chat_type: ctx.chat.type,
+				chat_title: ctx.chat.title,
+			}
+
+			await ctx.reply(
+				`Информация о сообщении:\n${JSON.stringify(messageInfo, null, 2)}`
+			)
+		})
+
 		// Handle announcement creation button
 		this.bot.hears('📢 Создать анонс покатушки', async ctx => {
 			if (ctx.chat.type !== 'private') {
