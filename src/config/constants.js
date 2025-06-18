@@ -5,6 +5,7 @@ module.exports = {
 		messageThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_CHAT,
 		adminThreadId: process.env.MESSAGE_THREAD_ID_ADMIN_CHAT,
 		adminChannelId: process.env.ADMIN_CHAT,
+		moderatorChannelId: process.env.MODERATOR_CHAT,
 		announcementThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_ANNONCE,
 	},
 	database: {

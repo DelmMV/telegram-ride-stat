@@ -66,27 +66,31 @@ const downloadImage = async (fileId, ctx) => {
 		// Get file info from Telegram
 		const fileInfo = await ctx.telegram.getFile(fileId)
 		const fileUrl = `https://api.telegram.org/file/bot${config.bot.token}/${fileInfo.file_path}`
-		
+
 		// Generate a unique filename
-		const fileName = `track_${Date.now()}_${Math.floor(Math.random() * 10000)}.jpg`
+		const fileName = `track_${Date.now()}_${Math.floor(
+			Math.random() * 10000
+		)}.jpg`
 		const filePath = path.join(__dirname, '../../uploads', fileName)
-		
+
 		// Download the file
 		const response = await axios({
 			method: 'GET',
 			url: fileUrl,
-			responseType: 'stream'
+			responseType: 'stream',
 		})
-		
+
 		// Save the file
 		const writer = fs.createWriteStream(filePath)
 		response.data.pipe(writer)
-		
+
 		return new Promise((resolve, reject) => {
-			writer.on('finish', () => resolve({
-				fileName,
-				filePath
-			}))
+			writer.on('finish', () =>
+				resolve({
+					fileName,
+					filePath,
+				})
+			)
 			writer.on('error', reject)
 		})
 	} catch (error) {
@@ -103,17 +107,18 @@ createAnnouncementScene.on('photo', async ctx => {
 			// Get the largest photo from the array
 			const photo = ctx.message.photo[ctx.message.photo.length - 1]
 			const fileId = photo.file_id
-			
+
 			// Download and save the image
 			const imageInfo = await downloadImage(fileId, ctx)
-			
+
 			// Store image info in the announcement state
 			ctx.scene.state.announcement.routeLink = 'на картинке' // "Track on the image below"
 			ctx.scene.state.announcement.trackImage = imageInfo
-			
+
 			// Move to the next step
 			ctx.scene.state.step = 'charges'
-			await updateMessage(ctx,
+			await updateMessage(
+				ctx,
 				'Дата: ' +
 					ctx.scene.state.announcement.date +
 					'\n' +
@@ -137,7 +142,9 @@ createAnnouncementScene.on('photo', async ctx => {
 			)
 		} catch (error) {
 			console.error('Error processing photo:', error)
-			await ctx.reply('Произошла ошибка при обработке изображения. Пожалуйста, попробуйте еще раз или введите ссылку на трек.')
+			await ctx.reply(
+				'Произошла ошибка при обработке изображения. Пожалуйста, попробуйте еще раз или введите ссылку на трек.'
+			)
 		}
 	}
 })
@@ -156,14 +163,16 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 		ctx.scene.state.announcement = { date: text }
 		ctx.scene.state.step = 'name'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' + text + '\n\n' + 'Введите название катки:',
 			Markup.keyboard([['❌ Отмена']]).resize()
 		)
 	} else if (ctx.scene.state.step === 'name') {
 		ctx.scene.state.announcement.name = text
 		ctx.scene.state.step = 'meetingPlace'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -176,7 +185,8 @@ createAnnouncementScene.on('text', async ctx => {
 	} else if (ctx.scene.state.step === 'meetingPlace') {
 		ctx.scene.state.announcement.meetingPlace = text
 		ctx.scene.state.step = 'startTime'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -197,7 +207,8 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 		ctx.scene.state.announcement.startTime = text
 		ctx.scene.state.step = 'routeDistance'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -220,7 +231,8 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 		ctx.scene.state.announcement.routeDistance = text
 		ctx.scene.state.step = 'routeLink'
-		await updateMessage(ctx,
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -243,7 +255,8 @@ createAnnouncementScene.on('text', async ctx => {
 		ctx.scene.state.announcement.routeLink = text === '-' ? null : text
 		ctx.scene.state.announcement.trackImage = null // No image for text input
 		ctx.scene.state.step = 'charges'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -274,7 +287,8 @@ createAnnouncementScene.on('text', async ctx => {
 			['✅ Готово'],
 			['❌ Отмена'],
 		]).resize()
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -313,7 +327,8 @@ createAnnouncementScene.on('text', async ctx => {
 				.filter(t => t.selected)
 				.map(t => t.name)
 				.join(', ')
-			await updateMessage(ctx, 
+			await updateMessage(
+				ctx,
 				'Дата: ' +
 					ctx.scene.state.announcement.date +
 					'\n' +
@@ -365,13 +380,11 @@ createAnnouncementScene.on('text', async ctx => {
 		}
 	} else if (ctx.scene.state.step === 'speed') {
 		// Check if the input is a range or a single number
-		let speedValue = text;
+		let speedValue = text
 		if (text.startsWith('от ') && text.includes(' до ')) {
-			speedValue = text
-				.replace('от ', '')
-				.replace(' до ', '-')
+			speedValue = text.replace('от ', '').replace(' до ', '-')
 		}
-		
+
 		// Use the same regex as in validateAnnouncement function
 		const speedRegex = /^\d+-\d+$|^\d+$/
 		if (!speedRegex.test(speedValue)) {
@@ -383,7 +396,8 @@ createAnnouncementScene.on('text', async ctx => {
 		// Store the validated speed value
 		ctx.scene.state.announcement.speed = speedValue
 		ctx.scene.state.step = 'description'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -427,7 +441,8 @@ createAnnouncementScene.on('text', async ctx => {
 	} else if (ctx.scene.state.step === 'description') {
 		ctx.scene.state.announcement.description = text
 		ctx.scene.state.step = 'additionalOrganizers'
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -487,7 +502,8 @@ createAnnouncementScene.on('text', async ctx => {
 		ctx.scene.state.announcement.votingOptions = []
 		ctx.scene.state.step = 'voting'
 
-		await updateMessage(ctx, 
+		await updateMessage(
+			ctx,
 			'Дата: ' +
 				ctx.scene.state.announcement.date +
 				'\n' +
@@ -595,18 +611,22 @@ createAnnouncementScene.on('text', async ctx => {
 			)
 		} else {
 			// Check if we've already reached the maximum number of poll options (10)
-			if (ctx.scene.state.announcement.votingOptions && ctx.scene.state.announcement.votingOptions.length >= 10) {
+			if (
+				ctx.scene.state.announcement.votingOptions &&
+				ctx.scene.state.announcement.votingOptions.length >= 10
+			) {
 				await ctx.reply(
 					'Ошибка: В опросе Телеграм может быть максимум 10 вариантов ответа. Вы уже добавили максимальное количество. Нажмите "✅ Готово" для завершения.'
 				)
 				return
 			}
-			
+
 			// Check if the voting option exceeds Telegram's 100 character limit
 			if (text.length > 100) {
 				await ctx.reply(
-					'Ошибка: Вариант для голосования не может превышать 100 символов. Ваш вариант содержит ' + 
-					text.length + ' символов. Пожалуйста, сократите текст.'
+					'Ошибка: Вариант для голосования не может превышать 100 символов. Ваш вариант содержит ' +
+						text.length +
+						' символов. Пожалуйста, сократите текст.'
 				)
 				return
 			}
@@ -623,7 +643,8 @@ createAnnouncementScene.on('text', async ctx => {
 							.join('\n')
 					: ''
 
-			await updateMessage(ctx, 
+			await updateMessage(
+				ctx,
 				'Дата: ' +
 					ctx.scene.state.announcement.date +
 					'\n' +
@@ -707,16 +728,19 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 	if (ctx.scene.state.announcement.trackImage) {
 		// Добавляем метаданные в HTML-комментарий для обработки при одобрении
 		trackImageMetadata = `\n\n<!-- TRACK_IMAGE:${ctx.scene.state.announcement.trackImage.fileName} -->`
-		
+
 		// Также добавляем видимую информацию о треке в текст анонса
-		if (!ctx.scene.state.formattedAnnouncementFinal.includes('трек: на картинке')) {
+		if (
+			!ctx.scene.state.formattedAnnouncementFinal.includes('трек: на картинке')
+		) {
 			// Ищем строку с маршрутом
 			const routeRegex = /(🗺 Маршрут .+?)(\n|$)/
 			if (routeRegex.test(ctx.scene.state.formattedAnnouncementFinal)) {
-				ctx.scene.state.formattedAnnouncementFinal = ctx.scene.state.formattedAnnouncementFinal.replace(
-					routeRegex,
-					'$1, трек: на картинке$2'
-				)
+				ctx.scene.state.formattedAnnouncementFinal =
+					ctx.scene.state.formattedAnnouncementFinal.replace(
+						routeRegex,
+						'$1, трек: на картинке$2'
+					)
 			}
 		}
 	}
@@ -733,31 +757,35 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 		typeThreadId: typeof config.bot.adminThreadId,
 		moderationText,
 		keyboard,
-		hasTrackImage: !!ctx.scene.state.announcement.trackImage
+		hasTrackImage: !!ctx.scene.state.announcement.trackImage,
 	})
 
 	try {
 		// Сначала отправляем текст анонса
 		const res = await ctx.telegram.sendMessage(
-			config.bot.adminChannelId,
+			config.bot.chatId,
 			moderationText,
 			{
 				...keyboard,
-				message_thread_id: Number(config.bot.adminThreadId),
+				message_thread_id: Number(config.bot.announcementThreadId),
 			}
 		)
 		console.log('ANNOUNCEMENT TEXT SENT:', res)
-		
+
 		// Если есть картинка трека, отправляем ее отдельным сообщением
 		if (ctx.scene.state.announcement.trackImage) {
 			try {
-				const imagePath = path.join(__dirname, '../../uploads', ctx.scene.state.announcement.trackImage.fileName)
+				const imagePath = path.join(
+					__dirname,
+					'../../uploads',
+					ctx.scene.state.announcement.trackImage.fileName
+				)
 				const photoRes = await ctx.telegram.sendPhoto(
-					config.bot.adminChannelId,
+					config.bot.chatId,
 					{ source: fs.readFileSync(imagePath) },
 					{
 						caption: 'Трек для анонса',
-						message_thread_id: Number(config.bot.adminThreadId),
+						message_thread_id: Number(config.bot.announcementThreadId),
 					}
 				)
 				console.log('TRACK IMAGE SENT:', photoRes)
@@ -765,35 +793,19 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 				console.error('ERROR SENDING ANNOUNCEMENT WITH TRACK IMAGE:', imageErr)
 				// Если не удалось отправить с картинкой, отправляем только текст
 				const res = await ctx.telegram.sendMessage(
-					config.bot.adminChannelId,
+					config.bot.chatId,
 					moderationText,
 					{
 						...keyboard,
-						message_thread_id: Number(config.bot.adminThreadId),
+						message_thread_id: Number(config.bot.announcementThreadId),
 					}
 				)
 				console.log('FALLBACK: MODERATION MESSAGE SENT WITHOUT IMAGE:', res)
 			}
-		} else {
-			// Если картинки нет, отправляем только текст анонса
-			const res = await ctx.telegram.sendMessage(
-				config.bot.adminChannelId,
-				moderationText,
-				{
-					...keyboard,
-					message_thread_id: Number(config.bot.adminThreadId),
-				}
-			)
-			console.log('MODERATION MESSAGE SENT:', res)
 		}
 	} catch (err) {
 		console.error('ERROR SENDING MODERATION MESSAGE:', err)
 	}
-
-	// Сначала отправляем сообщение о модерации
-	// await ctx.reply(
-	// 	'✅ Анонс отправлен на модерацию. Вы получите уведомление после проверки.'
-	// )
 
 	// Затем отправляем сообщение со стандартной клавиатурой
 	// Отправляем новое сообщение с подтверждением и стандартной клавиатурой
