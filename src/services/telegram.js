@@ -502,7 +502,7 @@ class TelegramService {
 								config.bot.chatId,
 								`@${creatorUsername}, ✅ Ваш анонс одобрен и опубликован!`,
 								{
-									message_thread_id: config.bot.messageThreadId,
+									message_thread_id: config.bot.announcementThreadId,
 								}
 							)
 							console.log(
@@ -526,7 +526,7 @@ class TelegramService {
 							config.bot.chatId,
 							`@${creatorUsername}, ✅ Ваш анонс одобрен и опубликован!`,
 							{
-								message_thread_id: config.bot.messageThreadId,
+								message_thread_id: config.bot.announcementThreadId,
 							}
 						)
 						console.log(
@@ -565,7 +565,7 @@ class TelegramService {
 								{ source: fs.readFileSync(imagePath) },
 								{
 									caption: escapeHTML(announcementTextToSend),
-									message_thread_id: config.bot.messageThreadId,
+									message_thread_id: config.bot.announcementThreadId,
 									parse_mode: 'HTML',
 								}
 							)
@@ -579,7 +579,7 @@ class TelegramService {
 								config.bot.chatId,
 								escapeHTML(announcementTextToSend),
 								{
-									message_thread_id: config.bot.messageThreadId,
+									message_thread_id: config.bot.announcementThreadId,
 									parse_mode: 'HTML',
 								}
 							)
@@ -595,7 +595,7 @@ class TelegramService {
 							config.bot.chatId,
 							escapeHTML(announcementTextToSend),
 							{
-								message_thread_id: config.bot.messageThreadId,
+								message_thread_id: config.bot.announcementThreadId,
 								parse_mode: 'HTML',
 							}
 						)
@@ -609,7 +609,7 @@ class TelegramService {
 						config.bot.chatId,
 						escapeHTML(announcementTextToSend),
 						{
-							message_thread_id: config.bot.messageThreadId,
+							message_thread_id: config.bot.announcementThreadId,
 							parse_mode: 'HTML',
 						}
 					)
@@ -625,7 +625,7 @@ class TelegramService {
 						{
 							is_anonymous: false,
 							allows_multiple_answers: true,
-							message_thread_id: config.bot.messageThreadId,
+							message_thread_id: config.bot.announcementThreadId,
 						}
 					)
 				}
@@ -708,7 +708,7 @@ class TelegramService {
 								config.bot.chatId,
 								`@${creatorUsername}, ❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`,
 								{
-									message_thread_id: config.bot.messageThreadId,
+									message_thread_id: config.bot.announcementThreadId,
 								}
 							)
 							console.log(
@@ -729,7 +729,7 @@ class TelegramService {
 						config.bot.chatId,
 						`@${creatorUsername}, ❌ Ваш анонс отклонён модератором ${adminName}.\nПожалуйста, создайте новый анонс с учётом правил.`,
 						{
-							message_thread_id: config.bot.messageThreadId,
+							message_thread_id: config.bot.announcementThreadId,
 						}
 					)
 					console.log(
