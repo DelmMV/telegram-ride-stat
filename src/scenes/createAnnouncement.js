@@ -751,10 +751,10 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 	const moderationText = `Новый анонс от @${ctx.from.username}:\n\n${ctx.scene.state.formattedAnnouncementFinal}${votingTextModeration}${trackImageMetadata}${creatorMetadata}`
 
 	console.log('SEND TO MODERATION:', {
-		chatId: config.bot.adminChannelId,
-		threadId: config.bot.adminThreadId,
-		typeChatId: typeof config.bot.adminChannelId,
-		typeThreadId: typeof config.bot.adminThreadId,
+		chatId: config.bot.moderatorChannelId,
+		threadId: config.bot.announcementThreadId,
+		typeChatId: typeof config.bot.moderatorChannelId,
+		typeThreadId: typeof config.bot.announcementThreadId,
 		moderationText,
 		keyboard,
 		hasTrackImage: !!ctx.scene.state.announcement.trackImage,
@@ -767,6 +767,7 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 			moderationText,
 			{
 				...keyboard,
+				message_thread_id: Number(config.bot.announcementThreadId),
 			}
 		)
 		console.log('ANNOUNCEMENT TEXT SENT:', res)
@@ -784,6 +785,7 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 					{ source: fs.readFileSync(imagePath) },
 					{
 						caption: 'Трек для анонса',
+						message_thread_id: Number(config.bot.announcementThreadId),
 					}
 				)
 				console.log('TRACK IMAGE SENT:', photoRes)
@@ -795,6 +797,7 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 					moderationText,
 					{
 						...keyboard,
+						message_thread_id: Number(config.bot.announcementThreadId),
 					}
 				)
 				console.log('FALLBACK: MODERATION MESSAGE SENT WITHOUT IMAGE:', res)
