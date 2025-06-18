@@ -763,11 +763,10 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 	try {
 		// Сначала отправляем текст анонса
 		const res = await ctx.telegram.sendMessage(
-			config.bot.chatId,
+			config.bot.moderatorChannelId,
 			moderationText,
 			{
 				...keyboard,
-				message_thread_id: Number(config.bot.announcementThreadId),
 			}
 		)
 		console.log('ANNOUNCEMENT TEXT SENT:', res)
@@ -781,11 +780,10 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 					ctx.scene.state.announcement.trackImage.fileName
 				)
 				const photoRes = await ctx.telegram.sendPhoto(
-					config.bot.chatId,
+					config.bot.moderatorChannelId,
 					{ source: fs.readFileSync(imagePath) },
 					{
 						caption: 'Трек для анонса',
-						message_thread_id: Number(config.bot.announcementThreadId),
 					}
 				)
 				console.log('TRACK IMAGE SENT:', photoRes)
@@ -793,11 +791,10 @@ createAnnouncementScene.action('submit_announcement', async ctx => {
 				console.error('ERROR SENDING ANNOUNCEMENT WITH TRACK IMAGE:', imageErr)
 				// Если не удалось отправить с картинкой, отправляем только текст
 				const res = await ctx.telegram.sendMessage(
-					config.bot.chatId,
+					config.bot.moderatorChannelId,
 					moderationText,
 					{
 						...keyboard,
-						message_thread_id: Number(config.bot.announcementThreadId),
 					}
 				)
 				console.log('FALLBACK: MODERATION MESSAGE SENT WITHOUT IMAGE:', res)
