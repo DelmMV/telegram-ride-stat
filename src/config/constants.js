@@ -6,11 +6,11 @@ module.exports = {
 		adminThreadId: process.env.MESSAGE_THREAD_ID_ADMIN_CHAT,
 		adminChannelId: process.env.ADMIN_CHAT,
 		moderatorChannelId: process.env.MODERATOR_CHAT,
-		moderatorThreadId: process.env.MESSAGE_THREAD_ID_MODERATOR_ANNONCE,
+		moderatorThreadId: process.env.MESSAGE_THREAD_ID_MODERATOR_CHAT,
 		announcementThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_ANNONCE,
 	},
 	database: {
-		url: 'mongodb://192.168.0.107:27017',
+		url: 'mongodb://192.168.0.176:27017',
 		name: 'geolocation_db',
 	},
 	thresholds: {

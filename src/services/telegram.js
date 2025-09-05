@@ -19,10 +19,22 @@ class TelegramService {
 		this.bot = new Telegraf(config.bot.token)
 		this.activeLocations = new Map()
 		this.loadingMessages = new Map()
+		this.locationWarnings = new Map()
 
 		// Initialize session middleware with local storage
 		const localSession = new LocalSession({ database: 'sessions.json' })
 		this.bot.use(localSession.middleware())
+
+		// Log configuration
+		console.log('Bot configuration:', {
+			moderatorChannelId: config.bot.moderatorChannelId,
+			moderatorThreadId: config.bot.moderatorThreadId,
+			announcementThreadId: config.bot.announcementThreadId,
+			chatId: config.bot.chatId,
+			messageThreadId: config.bot.messageThreadId,
+		})
+
+		this.setupHandlers()
 	}
 
 	async getUserAvatarUrl(userId) {
