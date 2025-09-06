@@ -10,7 +10,7 @@ module.exports = {
 		announcementThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_ANNONCE,
 	},
 	database: {
-		url: 'mongodb://192.168.0.176:27017',
+		url: 'mongodb://localhost:27017',
 		name: 'geolocation_db',
 	},
 	thresholds: {
