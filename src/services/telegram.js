@@ -33,8 +33,6 @@ class TelegramService {
 			chatId: config.bot.chatId,
 			messageThreadId: config.bot.messageThreadId,
 		})
-
-		this.setupHandlers()
 	}
 
 	async getUserAvatarUrl(userId) {
