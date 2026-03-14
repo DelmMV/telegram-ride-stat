@@ -19,10 +19,12 @@ const {
 	fromPersistenceDoc,
 } = require('./cleanupState')
 let pRetry
+let pRetryAbortError
 
 // Динамический импорт p-retry
 import('p-retry').then(module => {
 	pRetry = module.default
+	pRetryAbortError = module.AbortError || pRetry?.AbortError
 })
 
 class TelegramService {
@@ -34,6 +36,11 @@ class TelegramService {
 		this.loadingMessages = new Map()
 		this.cleanupSweepTimer = null
 		this.isCleanupSweepRunning = false
+		this.avatarCache = new Map()
+		this.avatarRequests = new Map()
+		this.avatarCacheTtlMs = Number(process.env.AVATAR_CACHE_TTL_MS) || 3600000
+		this.lastCleanupStatsSignature = null
+		this.lastCleanupStatsLogAt = 0
 
 		// Initialize session middleware with local storage
 		const localSession = new LocalSession({ database: 'sessions.json' })
@@ -370,7 +377,9 @@ class TelegramService {
 							error.code === 'ECONNRESET' ||
 							error.message === 'Operation timed out'
 						) {
-							throw new pRetry.AbortError(error)
+							if (pRetryAbortError) {
+								throw new pRetryAbortError(error)
+							}
 						}
 						throw error
 					}
@@ -407,7 +416,9 @@ class TelegramService {
 								error.code === 'ECONNRESET' ||
 								error.message === 'Operation timed out'
 							) {
-								throw new pRetry.AbortError(error)
+								if (pRetryAbortError) {
+									throw new pRetryAbortError(error)
+								}
 							}
 							throw error
 						}
@@ -431,6 +442,44 @@ class TelegramService {
 			// Не выбрасываем ошибку дальше, чтобы бот продолжал работать
 		}
 		return null
+	}
+
+	getCachedAvatarUrl(userId) {
+		const cached = this.avatarCache.get(userId)
+		if (!cached) return null
+		if (Date.now() - cached.fetchedAt > this.avatarCacheTtlMs) {
+			this.avatarCache.delete(userId)
+			return null
+		}
+		return cached.url
+	}
+
+	async getUserAvatarUrlFast(userId, timeoutMs = 300) {
+		const cached = this.getCachedAvatarUrl(userId)
+		if (cached) {
+			return cached
+		}
+
+		let request = this.avatarRequests.get(userId)
+		if (!request) {
+			request = this.getUserAvatarUrl(userId)
+				.then(url => {
+					if (url) {
+						this.avatarCache.set(userId, { url, fetchedAt: Date.now() })
+					}
+					return url
+				})
+				.catch(() => null)
+				.finally(() => {
+					this.avatarRequests.delete(userId)
+				})
+			this.avatarRequests.set(userId, request)
+		}
+
+		return Promise.race([
+			request,
+			new Promise(resolve => setTimeout(() => resolve(cached || null), timeoutMs)),
+		])
 	}
 
 	async checkAndRemoveInactiveLocations() {
@@ -486,12 +535,22 @@ class TelegramService {
 			if (entry.status === CLEANUP_STATUS.FAILED) failedWarnings += 1
 		}
 
-		this.logCleanupEvent('sweep_stats', {
+		const payload = {
 			livePending: this.activeLiveByMessageId.size,
 			warningPending: this.pendingWarningByMessageId.size,
 			liveFailed: failedLive,
 			warningFailed: failedWarnings,
-		})
+		}
+		const signature = JSON.stringify(payload)
+		const now = Date.now()
+		const shouldLog =
+			signature !== this.lastCleanupStatsSignature ||
+			now - this.lastCleanupStatsLogAt >= 60000
+		if (shouldLog) {
+			this.logCleanupEvent('sweep_stats', payload)
+			this.lastCleanupStatsSignature = signature
+			this.lastCleanupStatsLogAt = now
+		}
 	}
 
 	getCleanupStatsSnapshot() {
@@ -1190,7 +1249,7 @@ class TelegramService {
 				longitude: location.longitude,
 			})
 
-			const avatarUrl = await this.getUserAvatarUrl(userId)
+			const avatarUrl = await this.getUserAvatarUrlFast(userId, 1500)
 
 			await locationService.processLocation(
 				userId,
@@ -1227,11 +1286,7 @@ class TelegramService {
 
 					let avatarUrl = null
 					try {
-						// Ограничиваем время получения аватарки 5 секундами
-						avatarUrl = await Promise.race([
-							this.getUserAvatarUrl(userId),
-							new Promise(resolve => setTimeout(() => resolve(null), 5000)),
-						])
+						avatarUrl = await this.getUserAvatarUrlFast(userId, 250)
 					} catch (avatarErr) {
 						console.error('Ошибка получения аватарки пользователя:', avatarErr)
 						avatarUrl = null
