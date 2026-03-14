@@ -668,9 +668,20 @@ class TelegramService {
 	}
 
 	setupHandlers() {
-		const weekStatsButtonRegex = /^📊\s*[CС]татистика за прошедшую неделю$/
-		const weekTopButtonText = '🏆 Топ за прошедшую неделю'
-		const monthTopButtonText = '📅 Топ за прошедший месяц'
+		const weekStatsButtonRegex = /[📊\s]*[CС]татистика за прошедшую неделю$/i
+		const weekTopButtonRegex = /[🏆\s]*Топ за прошедшую неделю$/i
+		const monthTopButtonRegex = /[📅\s]*Топ за прошедший месяц$/i
+
+		const isStatsChatAllowed = ctx =>
+			ctx.chat.type === 'private' ||
+			ctx.chat.id.toString() === config.bot.chatId
+
+		const isWeekStatsButtonText = text =>
+			weekStatsButtonRegex.test((text || '').trim())
+		const isWeekTopButtonText = text =>
+			weekTopButtonRegex.test((text || '').trim())
+		const isMonthTopButtonText = text =>
+			monthTopButtonRegex.test((text || '').trim())
 
 		const sendWeekStats = async ctx => {
 			const userId = ctx.from.id
@@ -1209,21 +1220,21 @@ class TelegramService {
 		})
 
 		this.bot.hears(weekStatsButtonRegex, async ctx => {
-			if (ctx.chat.type !== 'private') {
+			if (!isStatsChatAllowed(ctx)) {
 				return
 			}
 			await sendWeekStats(ctx)
 		})
 
-		this.bot.hears(weekTopButtonText, async ctx => {
-			if (ctx.chat.type !== 'private') {
+		this.bot.hears(weekTopButtonRegex, async ctx => {
+			if (!isStatsChatAllowed(ctx)) {
 				return
 			}
 			await sendWeekTop(ctx)
 		})
 
-		this.bot.hears(monthTopButtonText, async ctx => {
-			if (ctx.chat.type !== 'private') {
+		this.bot.hears(monthTopButtonRegex, async ctx => {
+			if (!isStatsChatAllowed(ctx)) {
 				return
 			}
 			await sendMonthTop(ctx)
@@ -1414,6 +1425,22 @@ class TelegramService {
 
 			if (ctx.message.location) {
 				return
+			}
+
+			const messageText = (ctx.message.text || '').trim()
+			if (isStatsChatAllowed(ctx)) {
+				if (isWeekStatsButtonText(messageText)) {
+					await sendWeekStats(ctx)
+					return
+				}
+				if (isWeekTopButtonText(messageText)) {
+					await sendWeekTop(ctx)
+					return
+				}
+				if (isMonthTopButtonText(messageText)) {
+					await sendMonthTop(ctx)
+					return
+				}
 			}
 
 			const activeLocation = this.getLiveEntryByUserId(from.id)
