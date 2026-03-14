@@ -39,6 +39,12 @@ class TelegramService {
 		this.avatarCache = new Map()
 		this.avatarRequests = new Map()
 		this.avatarCacheTtlMs = Number(process.env.AVATAR_CACHE_TTL_MS) || 3600000
+		this.avatarFailureCooldownMs =
+			Number(process.env.AVATAR_FAILURE_COOLDOWN_MS) || 300000
+		this.avatarRequestTimeoutMs =
+			Number(process.env.AVATAR_REQUEST_TIMEOUT_MS) || 4000
+		this.avatarFailureUntilByUser = new Map()
+		this.lastAvatarErrorLogAt = 0
 		this.lastCleanupStatsSignature = null
 		this.lastCleanupStatsLogAt = 0
 
@@ -363,7 +369,10 @@ class TelegramService {
 				async () => {
 					try {
 						const timeoutPromise = new Promise((_, reject) => {
-							setTimeout(() => reject(new Error('Operation timed out')), 30000)
+							setTimeout(
+								() => reject(new Error('Operation timed out')),
+								this.avatarRequestTimeoutMs
+							)
 						})
 						const photosPromise = this.bot.telegram.getUserProfilePhotos(
 							userId,
@@ -405,7 +414,7 @@ class TelegramService {
 							const timeoutPromise = new Promise((_, reject) => {
 								setTimeout(
 									() => reject(new Error('Operation timed out')),
-									30000
+									this.avatarRequestTimeoutMs
 								)
 							})
 							const filePromise = this.bot.telegram.getFile(fileId)
@@ -438,6 +447,20 @@ class TelegramService {
 				return `https://api.telegram.org/file/bot${config.bot.token}/${file.file_path}`
 			}
 		} catch (error) {
+			if (
+				error?.message === 'Operation timed out' ||
+				error?.code === 'ETIMEDOUT' ||
+				error?.name === 'AbortError'
+			) {
+				const now = Date.now()
+				if (now - this.lastAvatarErrorLogAt >= 60000) {
+					console.warn(
+						`Аватарка временно недоступна (timeout), userId=${userId}. Повторим позже.`
+					)
+					this.lastAvatarErrorLogAt = now
+				}
+				return null
+			}
 			console.error('Ошибка при получении аватарки пользователя:', error)
 			// Не выбрасываем ошибку дальше, чтобы бот продолжал работать
 		}
@@ -459,6 +482,11 @@ class TelegramService {
 		if (cached) {
 			return cached
 		}
+		const now = Date.now()
+		const failureUntil = this.avatarFailureUntilByUser.get(userId)
+		if (failureUntil && now < failureUntil) {
+			return null
+		}
 
 		let request = this.avatarRequests.get(userId)
 		if (!request) {
@@ -466,10 +494,22 @@ class TelegramService {
 				.then(url => {
 					if (url) {
 						this.avatarCache.set(userId, { url, fetchedAt: Date.now() })
+						this.avatarFailureUntilByUser.delete(userId)
+					} else {
+						this.avatarFailureUntilByUser.set(
+							userId,
+							Date.now() + this.avatarFailureCooldownMs
+						)
 					}
 					return url
 				})
-				.catch(() => null)
+				.catch(() => {
+					this.avatarFailureUntilByUser.set(
+						userId,
+						Date.now() + this.avatarFailureCooldownMs
+					)
+					return null
+				})
 				.finally(() => {
 					this.avatarRequests.delete(userId)
 				})
@@ -628,6 +668,39 @@ class TelegramService {
 	}
 
 	setupHandlers() {
+		const weekStatsButtonRegex = /^📊\s*[CС]татистика за прошедшую неделю$/
+		const weekTopButtonText = '🏆 Топ за прошедшую неделю'
+		const monthTopButtonText = '📅 Топ за прошедший месяц'
+
+		const sendWeekStats = async ctx => {
+			const userId = ctx.from.id
+			const { startTimestamp, endTimestamp } =
+				statsService.getTimestampRangeForPeriod('week')
+			const stats = await statsService.calculateStats(
+				userId,
+				startTimestamp,
+				endTimestamp
+			)
+			const response = statsService.formatStatsResponse(stats, 'week')
+			await ctx.reply(response)
+		}
+
+		const sendWeekTop = async ctx => {
+			await this.sendLoadingMessage(ctx, '⏳ Загружаем топ за прошедшую неделю...')
+			const topUsers = await statsService.getTopUsers('week')
+			await this.removeLoadingMessage(ctx)
+			const response = statsService.formatTopUsersResponse(topUsers, 'week')
+			await ctx.reply(response)
+		}
+
+		const sendMonthTop = async ctx => {
+			await this.sendLoadingMessage(ctx, '⏳ Загружаем топ за прошедший месяц...')
+			const topUsers = await statsService.getTopUsers('month')
+			await this.removeLoadingMessage(ctx)
+			const response = statsService.formatTopUsersResponse(topUsers, 'month')
+			await ctx.reply(response)
+		}
+
 		// Add announcement button to main keyboard
 		this.bot.command('start', async ctx => {
 			if (ctx.chat.type !== 'private') {
@@ -636,7 +709,7 @@ class TelegramService {
 
 			const keyboard = Markup.keyboard([
 				['🏆 Топ за прошедшую неделю', '📅 Топ за прошедший месяц'],
-				['📊 Cтатистика за прошедшую неделю'],
+				['📊 Статистика за прошедшую неделю'],
 				['📢 Создать анонс покатушки'],
 			]).resize()
 
@@ -671,6 +744,18 @@ class TelegramService {
 			await ctx.reply(
 				`Информация о сообщении:\n${JSON.stringify(messageInfo, null, 2)}`
 			)
+		})
+
+		this.bot.command('stats', async ctx => {
+			await sendWeekStats(ctx)
+		})
+
+		this.bot.command('top', async ctx => {
+			await sendWeekTop(ctx)
+		})
+
+		this.bot.command('month', async ctx => {
+			await sendMonthTop(ctx)
 		})
 
 		// Команда для диагностики cleanup-состояния (только админ-тред)
@@ -1123,51 +1208,25 @@ class TelegramService {
 			})
 		})
 
-		this.bot.hears('📊 Cтатистика за прошедшую неделю', async ctx => {
+		this.bot.hears(weekStatsButtonRegex, async ctx => {
 			if (ctx.chat.type !== 'private') {
 				return
 			}
-
-			const userId = ctx.from.id
-			const { startTimestamp, endTimestamp } =
-				statsService.getTimestampRangeForPeriod('week')
-			const stats = await statsService.calculateStats(
-				userId,
-				startTimestamp,
-				endTimestamp
-			)
-			const response = statsService.formatStatsResponse(stats, 'week')
-			await ctx.reply(response)
+			await sendWeekStats(ctx)
 		})
 
-		this.bot.hears('🏆 Топ за прошедшую неделю', async ctx => {
+		this.bot.hears(weekTopButtonText, async ctx => {
 			if (ctx.chat.type !== 'private') {
 				return
 			}
-
-			await this.sendLoadingMessage(
-				ctx,
-				'⏳ Загружаем топ за прошедшую неделю...'
-			)
-			const topUsers = await statsService.getTopUsers('week')
-			await this.removeLoadingMessage(ctx)
-			const response = statsService.formatTopUsersResponse(topUsers, 'week')
-			await ctx.reply(response)
+			await sendWeekTop(ctx)
 		})
 
-		this.bot.hears('📅 Топ за прошедший месяц', async ctx => {
+		this.bot.hears(monthTopButtonText, async ctx => {
 			if (ctx.chat.type !== 'private') {
 				return
 			}
-
-			await this.sendLoadingMessage(
-				ctx,
-				'⏳ Загружаем топ за прошедший месяц...'
-			)
-			const topUsers = await statsService.getTopUsers('month')
-			await this.removeLoadingMessage(ctx)
-			const response = statsService.formatTopUsersResponse(topUsers, 'month')
-			await ctx.reply(response)
+			await sendMonthTop(ctx)
 		})
 
 		this.bot.on('location', async ctx => {
