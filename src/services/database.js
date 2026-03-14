@@ -58,9 +58,47 @@ class DatabaseService {
 			await collection.createIndex({ timestamp: 1 })
 			await collection.createIndex({ userId: 1, timestamp: 1 })
 			await collection.createIndex({ sessionId: 1 })
+			const cleanupCollection = this.db.collection('cleanup_state')
+			await cleanupCollection.createIndex({ kind: 1, status: 1, expiresAt: 1 })
+			await cleanupCollection.createIndex({ userId: 1, kind: 1 })
+			await cleanupCollection.createIndex({ updatedAt: 1 })
 			console.log('Indexes created successfully')
 		} catch (error) {
 			console.error('Error creating indexes:', error)
+			throw error
+		}
+	}
+
+	async upsertCleanupState(state) {
+		try {
+			const collection = this.db.collection('cleanup_state')
+			await collection.updateOne(
+				{ _id: state._id },
+				{ $set: state },
+				{ upsert: true }
+			)
+		} catch (error) {
+			console.error('Error upserting cleanup state:', error)
+			throw error
+		}
+	}
+
+	async deleteCleanupState(stateId) {
+		try {
+			const collection = this.db.collection('cleanup_state')
+			await collection.deleteOne({ _id: stateId })
+		} catch (error) {
+			console.error('Error deleting cleanup state:', error)
+			throw error
+		}
+	}
+
+	async getCleanupStates() {
+		try {
+			const collection = this.db.collection('cleanup_state')
+			return await collection.find({}).toArray()
+		} catch (error) {
+			console.error('Error getting cleanup states:', error)
 			throw error
 		}
 	}

@@ -1,12 +1,23 @@
 const { Telegraf, Scenes, session, Markup } = require('telegraf')
 const config = require('../config/constants')
 const statsService = require('./stats')
+const db = require('./database')
 const fs = require('fs')
 const path = require('path')
 const locationService = require('./location')
 const announcementService = require('./announcement')
 const LocalSession = require('telegraf-session-local')
 const createAnnouncementScene = require('../scenes/createAnnouncement')
+const {
+	CLEANUP_KIND,
+	CLEANUP_STATUS,
+	createCleanupEntry,
+	isDueForCleanup,
+	computeRetryExpiresAt,
+	uniqMessageIds,
+	toPersistenceDoc,
+	fromPersistenceDoc,
+} = require('./cleanupState')
 let pRetry
 
 // Динамический импорт p-retry
@@ -17,9 +28,12 @@ import('p-retry').then(module => {
 class TelegramService {
 	constructor() {
 		this.bot = new Telegraf(config.bot.token)
-		this.activeLocations = new Map()
+		this.activeLiveByMessageId = new Map()
+		this.activeLiveByUserId = new Map()
+		this.pendingWarningByMessageId = new Map()
 		this.loadingMessages = new Map()
-		this.locationWarnings = new Map()
+		this.cleanupSweepTimer = null
+		this.isCleanupSweepRunning = false
 
 		// Initialize session middleware with local storage
 		const localSession = new LocalSession({ database: 'sessions.json' })
@@ -33,6 +47,303 @@ class TelegramService {
 			chatId: config.bot.chatId,
 			messageThreadId: config.bot.messageThreadId,
 		})
+		this.logCleanupEvent('cleanup_config', {
+			sweepIntervalMs: config.cleanup.cleanupSweepIntervalMs,
+			warningDeleteDelayMs: config.cleanup.warningDeleteDelayMs,
+			infiniteLiveDeleteDelayMs: config.cleanup.infiniteLiveDeleteDelayMs,
+			inactiveLiveMs: config.cleanup.inactiveLiveMs,
+			deleteRetryMaxAttempts: config.cleanup.deleteRetryMaxAttempts,
+			deleteRetryBackoffMs: config.cleanup.deleteRetryBackoffMs,
+			persistState: config.cleanup.persistState,
+		})
+	}
+
+	logCleanupEvent(event, payload = {}) {
+		console.log(`[cleanup] ${event}`, payload)
+	}
+
+	isCleanupPersistenceEnabled() {
+		return !!config.cleanup.persistState
+	}
+
+	isTargetThread(chatId, threadId) {
+		return (
+			chatId?.toString() === config.bot.chatId &&
+			threadId?.toString() === config.bot.messageThreadId
+		)
+	}
+
+	getLiveEntryByUserId(userId) {
+		const messageId = this.activeLiveByUserId.get(userId)
+		if (!messageId) return null
+		return this.activeLiveByMessageId.get(messageId) || null
+	}
+
+	async persistCleanupEntry(entry) {
+		if (!this.isCleanupPersistenceEnabled()) return
+		try {
+			await db.upsertCleanupState(toPersistenceDoc(entry))
+		} catch (error) {
+			this.logCleanupEvent('persist_error', {
+				kind: entry.kind,
+				messageId: entry.messageId,
+				chatId: entry.chatId,
+				error: error.message,
+			})
+		}
+	}
+
+	async deletePersistedCleanupEntry(entry) {
+		if (!this.isCleanupPersistenceEnabled()) return
+		try {
+			await db.deleteCleanupState(entry.id)
+		} catch (error) {
+			this.logCleanupEvent('persist_delete_error', {
+				kind: entry.kind,
+				messageId: entry.messageId,
+				chatId: entry.chatId,
+				error: error.message,
+			})
+		}
+	}
+
+	async removeLiveEntry(entry, { removePersisted = true } = {}) {
+		if (!entry) return
+		this.activeLiveByMessageId.delete(entry.messageId)
+		if (this.activeLiveByUserId.get(entry.userId) === entry.messageId) {
+			this.activeLiveByUserId.delete(entry.userId)
+		}
+		if (removePersisted) {
+			await this.deletePersistedCleanupEntry(entry)
+		}
+	}
+
+	async removeWarningEntry(entry, { removePersisted = true } = {}) {
+		if (!entry) return
+		this.pendingWarningByMessageId.delete(entry.messageId)
+		if (removePersisted) {
+			await this.deletePersistedCleanupEntry(entry)
+		}
+	}
+
+	async registerLiveLocation({
+		chatId,
+		threadId,
+		messageId,
+		userId,
+		username,
+		locationTimestamp,
+		latitude,
+		longitude,
+	}) {
+		const now = Date.now()
+		const existingForUser = this.getLiveEntryByUserId(userId)
+		if (existingForUser && existingForUser.messageId !== messageId) {
+			await this.markForCleanup(
+				CLEANUP_KIND.LIVE,
+				existingForUser.messageId,
+				'replaced_live',
+				0
+			)
+			await this.cleanupMessages(existingForUser)
+		}
+
+		const existingByMessage = this.activeLiveByMessageId.get(messageId)
+		const entry = createCleanupEntry({
+			kind: CLEANUP_KIND.LIVE,
+			chatId,
+			threadId,
+			userId,
+			username,
+			messageId,
+			messagesToDelete: existingByMessage?.messagesToDelete || [],
+			lastUpdate: now,
+			locationTimestamp,
+			expiresAt: null,
+			attempts: existingByMessage?.attempts || 0,
+			status: CLEANUP_STATUS.PENDING,
+			lastError: null,
+		})
+		entry.latitude = latitude
+		entry.longitude = longitude
+		this.activeLiveByMessageId.set(messageId, entry)
+		this.activeLiveByUserId.set(userId, messageId)
+		await this.persistCleanupEntry(entry)
+	}
+
+	async registerWarningDeletion({
+		chatId,
+		threadId,
+		userId,
+		messageId,
+		messagesToDelete,
+		reason,
+		delayMs,
+	}) {
+		const now = Date.now()
+		const entry = createCleanupEntry({
+			kind: CLEANUP_KIND.WARNING,
+			chatId,
+			threadId,
+			userId,
+			messageId,
+			messagesToDelete: uniqMessageIds(messagesToDelete),
+			expiresAt: now + delayMs,
+			reason,
+			lastUpdate: now,
+			status: CLEANUP_STATUS.PENDING,
+		})
+		this.pendingWarningByMessageId.set(messageId, entry)
+		await this.persistCleanupEntry(entry)
+	}
+
+	async appendMessageToLiveEntry(liveMessageId, message) {
+		const entry = this.activeLiveByMessageId.get(liveMessageId)
+		if (!entry) return
+		if (!entry.messagesToDelete.some(msg => msg === message.messageId)) {
+			entry.messagesToDelete.push(message.messageId)
+		}
+		entry.lastUpdate = Date.now()
+		entry.status = CLEANUP_STATUS.PENDING
+		entry.expiresAt = null
+		entry.lastError = null
+		await this.persistCleanupEntry(entry)
+	}
+
+	async markForCleanup(kind, messageId, reason, delayMs = 0) {
+		const now = Date.now()
+		const entry =
+			kind === CLEANUP_KIND.LIVE
+				? this.activeLiveByMessageId.get(messageId)
+				: this.pendingWarningByMessageId.get(messageId)
+		if (!entry) return
+		entry.reason = reason
+		entry.expiresAt = now + delayMs
+		if (entry.status !== CLEANUP_STATUS.CLEANING) {
+			entry.status = CLEANUP_STATUS.PENDING
+		}
+		await this.persistCleanupEntry(entry)
+	}
+
+	isIgnorableDeleteError(error) {
+		const description = error?.response?.description || ''
+		return (
+			description.includes('message to delete not found') ||
+			description.includes("message can't be deleted")
+		)
+	}
+
+	isRetryableDeleteError(error) {
+		const errorCode = error?.code
+		const responseCode = error?.response?.error_code
+		return (
+			errorCode === 'ETIMEDOUT' ||
+			errorCode === 'ECONNRESET' ||
+			errorCode === 'EAI_AGAIN' ||
+			responseCode === 429 ||
+			responseCode >= 500
+		)
+	}
+
+	async safeDeleteMessage(chatId, messageId) {
+		try {
+			await this.bot.telegram.deleteMessage(chatId, messageId)
+			return { ok: true, ignored: false }
+		} catch (error) {
+			if (this.isIgnorableDeleteError(error)) {
+				return { ok: true, ignored: true }
+			}
+			return {
+				ok: false,
+				retryable: this.isRetryableDeleteError(error),
+				error,
+			}
+		}
+	}
+
+	collectMessageIdsForCleanup(entry) {
+		const baseMessageIds =
+			entry.kind === CLEANUP_KIND.LIVE
+				? [...(entry.messagesToDelete || []), entry.messageId]
+				: [...(entry.messagesToDelete || [])]
+		return uniqMessageIds(baseMessageIds).sort((a, b) => b - a)
+	}
+
+	async cleanupMessages(entry) {
+		if (!entry || entry.status === CLEANUP_STATUS.CLEANING) return
+
+		entry.status = CLEANUP_STATUS.CLEANING
+		entry.attempts += 1
+		await this.persistCleanupEntry(entry)
+
+		const messageIds = this.collectMessageIdsForCleanup(entry)
+		let cleanupError = null
+
+		for (const msgId of messageIds) {
+			const result = await this.safeDeleteMessage(entry.chatId, msgId)
+			if (!result.ok) {
+				cleanupError = result.error
+				break
+			}
+		}
+
+		if (!cleanupError) {
+			this.logCleanupEvent('cleanup_success', {
+				kind: entry.kind,
+				messageId: entry.messageId,
+				chatId: entry.chatId,
+				attempt: entry.attempts,
+				reason: entry.reason,
+			})
+			if (entry.kind === CLEANUP_KIND.LIVE) {
+				await this.removeLiveEntry(entry)
+			} else {
+				await this.removeWarningEntry(entry)
+			}
+			return
+		}
+
+		const isRetryable = this.isRetryableDeleteError(cleanupError)
+		entry.lastError = cleanupError.message || 'unknown cleanup error'
+		const cleanupErrorCode =
+			cleanupError?.response?.error_code || cleanupError?.code || 'unknown'
+		if (!isRetryable || entry.attempts >= config.cleanup.deleteRetryMaxAttempts) {
+			entry.status = CLEANUP_STATUS.FAILED
+			entry.expiresAt = null
+			this.logCleanupEvent('cleanup_failed_final', {
+				kind: entry.kind,
+				messageId: entry.messageId,
+				chatId: entry.chatId,
+				attempt: entry.attempts,
+				reason: entry.reason,
+				error: entry.lastError,
+				errorCode: cleanupErrorCode,
+			})
+			await this.persistCleanupEntry(entry)
+			if (entry.kind === CLEANUP_KIND.LIVE) {
+				await this.removeLiveEntry(entry)
+			} else {
+				await this.removeWarningEntry(entry)
+			}
+			return
+		}
+
+		entry.status = CLEANUP_STATUS.FAILED
+		entry.expiresAt = computeRetryExpiresAt(
+			entry.attempts,
+			config.cleanup.deleteRetryBackoffMs
+		)
+		this.logCleanupEvent('cleanup_failed_retry', {
+			kind: entry.kind,
+			messageId: entry.messageId,
+			chatId: entry.chatId,
+			attempt: entry.attempts,
+			nextRetryAt: entry.expiresAt,
+			reason: entry.reason,
+			error: entry.lastError,
+			errorCode: cleanupErrorCode,
+		})
+		await this.persistCleanupEntry(entry)
 	}
 
 	async getUserAvatarUrl(userId) {
@@ -123,145 +434,119 @@ class TelegramService {
 	}
 
 	async checkAndRemoveInactiveLocations() {
-		if (!pRetry) {
-			console.error('pRetry module is not loaded yet')
+		await this.runCleanupSweep()
+	}
+
+	async restoreCleanupStateOnStart() {
+		if (!this.isCleanupPersistenceEnabled()) {
+			this.logCleanupEvent(
+				'persistence_disabled',
+				{
+					note: 'Cleanup после рестарта будет работать только для новых сообщений',
+				}
+			)
 			return
 		}
-		const now = Date.now()
 
-		for (const [messageId, locationData] of this.activeLocations) {
-			if (now - locationData.lastUpdate > config.thresholds.maxInactivity) {
-				try {
-					const chatMember = await pRetry(
-						async () => {
-							try {
-								return await this.bot.telegram.getChatMember(
-									locationData.chatId,
-									this.bot.botInfo.id
-								)
-							} catch (error) {
-								if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
-									throw new pRetry.AbortError(error)
-								}
-								throw error
-							}
-						},
-						{
-							retries: 3,
-							onFailedAttempt: error => {
-								console.warn(
-									`Attempt ${error.attemptNumber} failed for getChatMember. ${error.retriesLeft} retries left.`
-								)
-							},
-						}
+		let states = []
+		try {
+			states = await db.getCleanupStates()
+		} catch (error) {
+			this.logCleanupEvent('restore_error', { error: error.message })
+			return
+		}
+
+		for (const doc of states) {
+			const entry = fromPersistenceDoc(doc)
+			if (!entry) continue
+			if (entry.kind === CLEANUP_KIND.LIVE) {
+				this.activeLiveByMessageId.set(entry.messageId, entry)
+				const existingForUser = this.getLiveEntryByUserId(entry.userId)
+				if (!existingForUser || existingForUser.lastUpdate < entry.lastUpdate) {
+					this.activeLiveByUserId.set(entry.userId, entry.messageId)
+				}
+			} else if (entry.kind === CLEANUP_KIND.WARNING) {
+				this.pendingWarningByMessageId.set(entry.messageId, entry)
+			}
+		}
+
+		this.logCleanupEvent('restore_complete', {
+			liveCount: this.activeLiveByMessageId.size,
+			warningCount: this.pendingWarningByMessageId.size,
+		})
+	}
+
+	logCleanupStats() {
+		let failedLive = 0
+		let failedWarnings = 0
+		for (const entry of this.activeLiveByMessageId.values()) {
+			if (entry.status === CLEANUP_STATUS.FAILED) failedLive += 1
+		}
+		for (const entry of this.pendingWarningByMessageId.values()) {
+			if (entry.status === CLEANUP_STATUS.FAILED) failedWarnings += 1
+		}
+
+		this.logCleanupEvent('sweep_stats', {
+			livePending: this.activeLiveByMessageId.size,
+			warningPending: this.pendingWarningByMessageId.size,
+			liveFailed: failedLive,
+			warningFailed: failedWarnings,
+		})
+	}
+
+	getCleanupStatsSnapshot() {
+		let liveFailed = 0
+		let warningFailed = 0
+		for (const entry of this.activeLiveByMessageId.values()) {
+			if (entry.status === CLEANUP_STATUS.FAILED) liveFailed += 1
+		}
+		for (const entry of this.pendingWarningByMessageId.values()) {
+			if (entry.status === CLEANUP_STATUS.FAILED) warningFailed += 1
+		}
+
+		return {
+			livePending: this.activeLiveByMessageId.size,
+			warningPending: this.pendingWarningByMessageId.size,
+			liveFailed,
+			warningFailed,
+		}
+	}
+
+	async runCleanupSweep() {
+		if (this.isCleanupSweepRunning) return
+		this.isCleanupSweepRunning = true
+		try {
+			const now = Date.now()
+
+			for (const entry of this.activeLiveByMessageId.values()) {
+				if (entry.status === CLEANUP_STATUS.CLEANING) continue
+				if (now - entry.lastUpdate >= config.cleanup.inactiveLiveMs) {
+					await this.markForCleanup(
+						CLEANUP_KIND.LIVE,
+						entry.messageId,
+						'inactive_live',
+						0
 					)
-
-					if (chatMember.can_delete_messages) {
-						if (locationData.messages && locationData.messages.length > 0) {
-							const sortedMessages = [...locationData.messages].sort(
-								(a, b) => b.timestamp - a.timestamp
-							)
-
-							for (const message of sortedMessages) {
-								try {
-									await pRetry(
-										async () => {
-											try {
-												await this.bot.telegram.deleteMessage(
-													locationData.chatId,
-													message.messageId
-												)
-											} catch (error) {
-												if (
-													error.code === 'ETIMEDOUT' ||
-													error.code === 'ECONNRESET'
-												) {
-													throw new pRetry.AbortError(error)
-												}
-												throw error
-											}
-										},
-										{
-											retries: 3,
-											onFailedAttempt: error => {
-												console.warn(
-													`Attempt ${error.attemptNumber} failed for deleteMessage. ${error.retriesLeft} retries left.`
-												)
-											},
-										}
-									)
-								} catch (err) {
-									// Ignore errors for already deleted messages
-									if (
-										err.response?.description ===
-											'Bad Request: message to delete not found' ||
-										err.response?.description ===
-											"Bad Request: message can't be deleted"
-									) {
-										continue
-									}
-									console.error(
-										`Error deleting message ${message.messageId}:`,
-										err.message
-									)
-								}
-							}
-						}
-
-						try {
-							await pRetry(
-								async () => {
-									try {
-										await this.bot.telegram.deleteMessage(
-											locationData.chatId,
-											messageId
-										)
-									} catch (error) {
-										if (
-											error.code === 'ETIMEDOUT' ||
-											error.code === 'ECONNRESET'
-										) {
-											throw new pRetry.AbortError(error)
-										}
-										throw error
-									}
-								},
-								{
-									retries: 3,
-									onFailedAttempt: error => {
-										console.warn(
-											`Attempt ${error.attemptNumber} failed for deleteMessage. ${error.retriesLeft} retries left.`
-										)
-									},
-								}
-							)
-						} catch (err) {
-							// Ignore errors for already deleted messages
-							if (
-								err.response?.description ===
-									'Bad Request: message to delete not found' ||
-								err.response?.description ===
-									"Bad Request: message can't be deleted"
-							) {
-								// Continue to next iteration
-								continue
-							}
-							console.error(
-								`Error deleting location message ${messageId}:`,
-								err.message
-							)
-						}
-					}
-				} catch (err) {
-					console.error(
-						`Error checking chat member for message ${messageId}:`,
-						err.message
-					)
-				} finally {
-					// Always remove from activeLocations regardless of deletion success
-					this.activeLocations.delete(messageId)
 				}
 			}
+
+			const liveDueEntries = [...this.activeLiveByMessageId.values()].filter(
+				entry => isDueForCleanup(entry, now)
+			)
+			for (const entry of liveDueEntries) {
+				await this.cleanupMessages(entry)
+			}
+
+			const warningDueEntries = [
+				...this.pendingWarningByMessageId.values(),
+			].filter(entry => isDueForCleanup(entry, now))
+			for (const entry of warningDueEntries) {
+				await this.cleanupMessages(entry)
+			}
+
+			this.logCleanupStats()
+		} finally {
+			this.isCleanupSweepRunning = false
 		}
 	}
 
@@ -326,6 +611,26 @@ class TelegramService {
 
 			await ctx.reply(
 				`Информация о сообщении:\n${JSON.stringify(messageInfo, null, 2)}`
+			)
+		})
+
+		// Команда для диагностики cleanup-состояния (только админ-тред)
+		this.bot.command('cleanup_debug', async ctx => {
+			const isAdminThread =
+				ctx.chat.id.toString() === config.bot.adminChannelId &&
+				ctx.message.message_thread_id?.toString() === config.bot.adminThreadId
+
+			if (!isAdminThread) {
+				return
+			}
+
+			const stats = this.getCleanupStatsSnapshot()
+			await ctx.reply(
+				`🧹 Cleanup debug:\n` +
+					`live pending: ${stats.livePending}\n` +
+					`warning pending: ${stats.warningPending}\n` +
+					`live failed: ${stats.liveFailed}\n` +
+					`warning failed: ${stats.warningFailed}`
 			)
 		})
 
@@ -822,118 +1127,70 @@ class TelegramService {
 			} = ctx.message
 			const live_period = ctx.message.location.live_period
 
-			if (
-				chat.id.toString() !== config.bot.chatId ||
-				messageThreadId?.toString() !== config.bot.messageThreadId
-			) {
+			if (!this.isTargetThread(chat.id, messageThreadId)) {
 				return
 			}
 
-			const avatarUrl = await this.getUserAvatarUrl(userId)
-
-			// Удаляем все предыдущие активные геолокации пользователя
-			for (const [key, locationData] of this.activeLocations) {
-				if (typeof key === 'string' && key.startsWith('warning_')) continue
-				if (locationData.userId === userId) {
-					// Удаляем все связанные сообщения
-					if (locationData.messages && locationData.messages.length > 0) {
-						for (const msg of locationData.messages) {
-							try {
-								await this.bot.telegram.deleteMessage(
-									locationData.chatId,
-									msg.messageId
-								)
-							} catch (err) {
-								if (
-									err.response?.description ===
-										'Bad Request: message to delete not found' ||
-									err.response?.description ===
-										"Bad Request: message can't be deleted"
-								) {
-									// Не критично
-								} else {
-									console.error('Error deleting geo message:', err)
-								}
-							}
-						}
+			if (live_period == null) {
+				const warningMessage = await ctx.reply(
+					`⚠️ В этом треде принимается только live-геолокация.\nСообщение будет удалено через ${
+						config.cleanup.warningDeleteDelayMs / 1000
+					} секунд.`,
+					{
+						reply_to_message_id: messageId,
+						message_thread_id: config.bot.messageThreadId,
 					}
-					// Удаляем основное сообщение геолокации
-					try {
-						await this.bot.telegram.deleteMessage(locationData.chatId, key)
-					} catch (err) {
-						if (
-							err.response?.description ===
-								'Bad Request: message to delete not found' ||
-							err.response?.description ===
-								"Bad Request: message can't be deleted"
-						) {
-							// Не критично
-						} else {
-							console.error('Error deleting geo main message:', err)
-						}
-					}
-					this.activeLocations.delete(key)
-				}
+				)
+				await this.registerWarningDeletion({
+					chatId: chat.id,
+					threadId: messageThreadId,
+					userId,
+					messageId,
+					messagesToDelete: [messageId, warningMessage.message_id],
+					reason: 'non_live_geo',
+					delayMs: config.cleanup.warningDeleteDelayMs,
+				})
+				return
 			}
 
-			if (!live_period || live_period === 2147483647) {
+			if (live_period === 2147483647) {
 				try {
 					const warningMessage = await ctx.reply(
 						`Нельзя кидать геопозицию с неограниченным временем. Геолокация будет удалена через ${
-							config.thresholds.infiniteLocationDeleteDelay / 1000
+							config.cleanup.infiniteLiveDeleteDelayMs / 1000
 						} секунд!`,
 						{
 							reply_to_message_id: messageId,
 							message_thread_id: config.bot.messageThreadId,
 						}
 					)
-
-					this.activeLocations.set(messageId, {
+					await this.registerWarningDeletion({
 						chatId: chat.id,
-						lastUpdate: Date.now(),
+						threadId: messageThreadId,
 						userId,
-						username,
-						latitude: location.latitude,
-						longitude: location.longitude,
-						timestamp: timestamp * 1000,
-						messages: [
-							{
-								messageId: warningMessage.message_id,
-								timestamp: warningMessage.date * 1000,
-							},
-						],
+						messageId,
+						messagesToDelete: [messageId, warningMessage.message_id],
+						reason: 'infinite_live',
+						delayMs: config.cleanup.infiniteLiveDeleteDelayMs,
 					})
-
-					setTimeout(async () => {
-						try {
-							await this.bot.telegram.deleteMessage(chat.id, messageId)
-							await this.bot.telegram.deleteMessage(
-								chat.id,
-								warningMessage.message_id
-							)
-						} catch (err) {
-							console.error('Error deleting messages:', err)
-						} finally {
-							this.activeLocations.delete(messageId)
-						}
-					}, config.thresholds.infiniteLocationDeleteDelay)
-
 					return
 				} catch (error) {
 					console.error('Error handling infinite location:', error)
 				}
 			}
 
-			this.activeLocations.set(messageId, {
+			await this.registerLiveLocation({
 				chatId: chat.id,
-				lastUpdate: Date.now(),
+				threadId: messageThreadId,
+				messageId,
 				userId,
 				username,
+				locationTimestamp: timestamp * 1000,
 				latitude: location.latitude,
 				longitude: location.longitude,
-				timestamp: timestamp * 1000,
-				messages: [],
 			})
+
+			const avatarUrl = await this.getUserAvatarUrl(userId)
 
 			await locationService.processLocation(
 				userId,
@@ -960,8 +1217,10 @@ class TelegramService {
 					const message = ctx.editedMessage
 
 					if (
-						message.chat.id.toString() !== config.bot.chatId ||
-						message.message_thread_id?.toString() !== config.bot.messageThreadId
+						!this.isTargetThread(
+							message.chat.id,
+							message.message_thread_id
+						)
 					) {
 						return
 					}
@@ -981,18 +1240,15 @@ class TelegramService {
 					if (message?.location) {
 						const { chat, message_id: messageId } = message
 
-						const existingLocation = this.activeLocations.get(messageId) || {
-							messages: [],
-						}
-						this.activeLocations.set(messageId, {
-							...existingLocation,
+						await this.registerLiveLocation({
 							chatId: chat.id,
-							lastUpdate: Date.now(),
+							threadId: message.message_thread_id,
+							messageId,
 							userId,
 							username,
+							locationTimestamp: timestamp * 1000,
 							latitude: location.latitude,
 							longitude: location.longitude,
-							timestamp: timestamp * 1000,
 						})
 					}
 
@@ -1038,10 +1294,7 @@ class TelegramService {
 				from,
 			} = ctx.message
 
-			if (
-				chat.id.toString() !== config.bot.chatId ||
-				messageThreadId?.toString() !== config.bot.messageThreadId
-			) {
+			if (!this.isTargetThread(chat.id, messageThreadId)) {
 				return
 			}
 
@@ -1049,67 +1302,29 @@ class TelegramService {
 				return
 			}
 
-			let hasActiveLocation = false
-			for (const [key, locationData] of this.activeLocations) {
-				if (typeof key === 'string' && key.startsWith('warning_')) continue
-				if (locationData.userId === from.id) {
-					hasActiveLocation = true
-					break
-				}
-			}
+			const activeLocation = this.getLiveEntryByUserId(from.id)
+			const hasActiveLocation =
+				!!activeLocation && activeLocation.status !== CLEANUP_STATUS.CLEANING
 
 			if (!hasActiveLocation) {
 				try {
 					const warningMessage = await ctx.reply(
 						`⚠️ В этой ветке нельзя отправлять сообщения без активной геолокации.\nВаше сообщение будет удалено через ${
-							config.thresholds.messageDeleteDelay / 1000
+							config.cleanup.warningDeleteDelayMs / 1000
 						} секунд.`,
 						{
 							reply_to_message_id: messageId,
 							message_thread_id: messageThreadId,
 						}
 					)
-
-					// Store both messages in activeLocations for cleanup
-					this.activeLocations.set(`warning_${messageId}`, {
+					await this.registerWarningDeletion({
 						chatId: chat.id,
-						messageId,
-						warningMessageId: warningMessage.message_id,
+						threadId: messageThreadId,
 						userId: from.id,
-						timeout: setTimeout(async () => {
-							try {
-								await this.bot.telegram.deleteMessage(chat.id, messageId)
-							} catch (err) {
-								if (
-									err.response?.description ===
-										'Bad Request: message to delete not found' ||
-									err.response?.description ===
-										"Bad Request: message can't be deleted"
-								) {
-									// Не критично, сообщение уже удалено
-								} else {
-									console.error('Error deleting user message:', err)
-								}
-							}
-
-							try {
-								await this.bot.telegram.deleteMessage(
-									chat.id,
-									warningMessage.message_id
-								)
-							} catch (err) {
-								if (
-									err.response?.description ===
-										'Bad Request: message to delete not found' ||
-									err.response?.description ===
-										"Bad Request: message can't be deleted"
-								) {
-									// Не критично, сообщение уже удалено
-								} else {
-									console.error('Error deleting warning message:', err)
-								}
-							}
-						}, config.thresholds.messageDeleteDelay),
+						messageId,
+						messagesToDelete: [messageId, warningMessage.message_id],
+						reason: 'no_active_live_text',
+						delayMs: config.cleanup.warningDeleteDelayMs,
 					})
 				} catch (err) {
 					console.error('Error sending warning message:', err)
@@ -1117,34 +1332,13 @@ class TelegramService {
 				return
 			}
 
-			for (const [key, locationData] of this.activeLocations) {
-				// Skip warning messages
-				if (typeof key === 'string' && key.startsWith('warning_')) continue
-
-				const messageTimestamp = date * 1000
-				const locationTimestamp = locationData.timestamp
-
-				if (
-					messageTimestamp >= locationTimestamp &&
-					from.id === locationData.userId
-				) {
-					const message = {
-						messageId,
-						timestamp: messageTimestamp,
-						userId: from.id,
-					}
-
-					if (
-						!locationData.messages.some(
-							msg => msg.messageId === message.messageId
-						)
-					) {
-						locationData.messages.push(message)
-						// Update lastUpdate for text messages to keep location active
-						locationData.lastUpdate = Date.now()
-						this.activeLocations.set(key, locationData)
-					}
-				}
+			const messageTimestamp = date * 1000
+			if (messageTimestamp >= activeLocation.locationTimestamp) {
+				await this.appendMessageToLiveEntry(activeLocation.messageId, {
+					messageId,
+					timestamp: messageTimestamp,
+					userId: from.id,
+				})
 			}
 		})
 	}
@@ -1160,60 +1354,20 @@ class TelegramService {
 		this.bot.use(stage.middleware())
 
 		this.setupHandlers()
-		setInterval(() => this.checkAndRemoveInactiveLocations(), 60000)
-		// Add cleanup for warning messages
-		setInterval(() => {
-			const now = Date.now()
-			for (const [key, locationData] of this.activeLocations) {
-				if (
-					typeof key === 'string' &&
-					key.startsWith('warning_') &&
-					locationData.timeout &&
-					now >=
-						locationData.timeout._idleStart +
-							config.thresholds.messageDeleteDelay
-				) {
-					// Delete both messages before removing from activeLocations
-					;(async () => {
-						try {
-							await this.bot.telegram.deleteMessage(
-								locationData.chatId,
-								locationData.messageId
-							)
-						} catch (err) {
-							if (
-								err.response?.description ===
-									'Bad Request: message to delete not found' ||
-								err.response?.description ===
-									"Bad Request: message can't be deleted"
-							) {
-								// Не критично, сообщение уже удалено
-							} else {
-								console.error('Error deleting user message:', err)
-							}
-						}
-						try {
-							await this.bot.telegram.deleteMessage(
-								locationData.chatId,
-								locationData.warningMessageId
-							)
-						} catch (err) {
-							if (
-								err.response?.description ===
-									'Bad Request: message to delete not found' ||
-								err.response?.description ===
-									"Bad Request: message can't be deleted"
-							) {
-								// Не критично, сообщение уже удалено
-							} else {
-								console.error('Error deleting warning message:', err)
-							}
-						}
-						this.activeLocations.delete(key)
-					})()
-				}
-			}
-		}, 60000)
+		this.restoreCleanupStateOnStart()
+			.then(() => this.checkAndRemoveInactiveLocations())
+			.catch(error => {
+				this.logCleanupEvent('restore_unhandled_error', { error: error.message })
+			})
+		this.cleanupSweepTimer = setInterval(
+			() =>
+				this.checkAndRemoveInactiveLocations().catch(error => {
+					this.logCleanupEvent('sweep_unhandled_error', {
+						error: error.message,
+					})
+				}),
+			config.cleanup.cleanupSweepIntervalMs
+		)
 		this.bot.launch()
 		console.log('Bot started')
 	}
