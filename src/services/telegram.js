@@ -1,4 +1,4 @@
-const { Telegraf, Scenes, session, Markup } = require('telegraf')
+const { Telegraf, Scenes, Markup } = require('telegraf')
 const config = require('../config/constants')
 const statsService = require('./stats')
 const db = require('./database')
@@ -47,10 +47,18 @@ class TelegramService {
 		this.lastAvatarErrorLogAt = 0
 		this.lastCleanupStatsSignature = null
 		this.lastCleanupStatsLogAt = 0
+		this.editedMessageLastProcessedAt = new Map()
+		this.editedLocationMinIntervalMs =
+			Number(process.env.EDITED_LOCATION_MIN_INTERVAL_MS) || 1200
+		this.editedThrottleKeyTtlMs =
+			Number(process.env.EDITED_LOCATION_THROTTLE_KEY_TTL_MS) || 10 * 60 * 1000
+		this.lastEditedThrottleCleanupAt = 0
 
 		// Initialize session middleware with local storage
 		const localSession = new LocalSession({ database: 'sessions.json' })
-		this.bot.use(localSession.middleware())
+		this.privateSessionMiddleware = localSession.middleware()
+		const stage = new Scenes.Stage([createAnnouncementScene])
+		this.privateStageMiddleware = stage.middleware()
 
 		// Log configuration
 		console.log('Bot configuration:', {
@@ -68,7 +76,18 @@ class TelegramService {
 			deleteRetryMaxAttempts: config.cleanup.deleteRetryMaxAttempts,
 			deleteRetryBackoffMs: config.cleanup.deleteRetryBackoffMs,
 			persistState: config.cleanup.persistState,
+			allowedUpdates: config.bot.allowedUpdates,
+			dropPendingUpdates: config.bot.dropPendingUpdates,
 		})
+	}
+
+	privateOnlyMiddleware(middleware) {
+		return async (ctx, next) => {
+			if (ctx.chat?.type !== 'private') {
+				return next()
+			}
+			return middleware(ctx, next)
+		}
 	}
 
 	logCleanupEvent(event, payload = {}) {
@@ -1319,7 +1338,11 @@ class TelegramService {
 				longitude: location.longitude,
 			})
 
-			const avatarUrl = await this.getUserAvatarUrlFast(userId, 1500)
+			let avatarUrl = this.getCachedAvatarUrl(userId)
+			if (!avatarUrl) {
+				avatarUrl = null
+				this.getUserAvatarUrlFast(userId, 100).catch(() => null)
+			}
 
 			await locationService.processLocation(
 				userId,
@@ -1354,12 +1377,29 @@ class TelegramService {
 						return
 					}
 
-					let avatarUrl = null
-					try {
-						avatarUrl = await this.getUserAvatarUrlFast(userId, 250)
-					} catch (avatarErr) {
-						console.error('Ошибка получения аватарки пользователя:', avatarErr)
+					const throttleKey = `${message.chat.id}:${message.message_id}`
+					const lastProcessedAt =
+						this.editedMessageLastProcessedAt.get(throttleKey) || 0
+					if (startTime - lastProcessedAt < this.editedLocationMinIntervalMs) {
+						return
+					}
+					this.editedMessageLastProcessedAt.set(throttleKey, startTime)
+					if (
+						this.editedMessageLastProcessedAt.size > 2000 &&
+						startTime - this.lastEditedThrottleCleanupAt >= 60000
+					) {
+						for (const [key, ts] of this.editedMessageLastProcessedAt.entries()) {
+							if (startTime - ts > this.editedThrottleKeyTtlMs) {
+								this.editedMessageLastProcessedAt.delete(key)
+							}
+						}
+						this.lastEditedThrottleCleanupAt = startTime
+					}
+
+					let avatarUrl = this.getCachedAvatarUrl(userId)
+					if (!avatarUrl) {
 						avatarUrl = null
+						this.getUserAvatarUrlFast(userId, 100).catch(() => null)
 					}
 
 					if (message?.location) {
@@ -1419,14 +1459,6 @@ class TelegramService {
 				from,
 			} = ctx.message
 
-			if (!this.isTargetThread(chat.id, messageThreadId)) {
-				return
-			}
-
-			if (ctx.message.location) {
-				return
-			}
-
 			const messageText = (ctx.message.text || '').trim()
 			if (isStatsChatAllowed(ctx)) {
 				if (isWeekStatsButtonText(messageText)) {
@@ -1441,6 +1473,14 @@ class TelegramService {
 					await sendMonthTop(ctx)
 					return
 				}
+			}
+
+			if (!this.isTargetThread(chat.id, messageThreadId)) {
+				return
+			}
+
+			if (ctx.message.location) {
+				return
 			}
 
 			const activeLocation = this.getLiveEntryByUserId(from.id)
@@ -1490,9 +1530,14 @@ class TelegramService {
 			console.error('Unhandled promise rejection:', error)
 			// Не завершаем процесс, позволяем боту продолжить работу
 		})
-		// Create stage with scenes
-		const stage = new Scenes.Stage([createAnnouncementScene])
-		this.bot.use(stage.middleware())
+		this.bot.catch((error, ctx) => {
+			console.error('Telegraf handler error:', {
+				error: error?.message || error,
+				updateType: ctx?.updateType,
+			})
+		})
+		this.bot.use(this.privateOnlyMiddleware(this.privateSessionMiddleware))
+		this.bot.use(this.privateOnlyMiddleware(this.privateStageMiddleware))
 
 		this.setupHandlers()
 		this.restoreCleanupStateOnStart()
@@ -1509,7 +1554,10 @@ class TelegramService {
 				}),
 			config.cleanup.cleanupSweepIntervalMs
 		)
-		this.bot.launch()
+		this.bot.launch({
+			dropPendingUpdates: config.bot.dropPendingUpdates,
+			allowedUpdates: config.bot.allowedUpdates,
+		})
 		console.log('Bot started')
 	}
 }

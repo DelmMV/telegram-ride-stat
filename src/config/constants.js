@@ -8,6 +8,14 @@ module.exports = {
 		moderatorChannelId: process.env.MODERATOR_CHAT,
 		moderatorThreadId: process.env.MESSAGE_THREAD_ID_MODERATOR_CHAT,
 		announcementThreadId: process.env.MESSAGE_THREAD_ID_MONOPITER_ANNONCE,
+		dropPendingUpdates: process.env.TELEGRAM_DROP_PENDING_UPDATES !== 'false',
+		allowedUpdates: (
+			process.env.TELEGRAM_ALLOWED_UPDATES ||
+			'message,edited_message,callback_query,poll_answer'
+		)
+			.split(',')
+			.map(item => item.trim())
+			.filter(Boolean),
 	},
 	database: {
 		url: 'mongodb://localhost:27017',
