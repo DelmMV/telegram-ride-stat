@@ -23,7 +23,7 @@ class LocationService {
 
 		const collection = db.db.collection('locations')
 		const lastLocation = await collection
-			.find({ userId })
+			.find({ userId }, { projection: { latitude: 1, longitude: 1, timestamp: 1, sessionId: 1 } })
 			.sort({ timestamp: -1 })
 			.limit(1)
 			.toArray()
@@ -36,6 +36,17 @@ class LocationService {
 			)
 
 			const timeDiff = timestamp - lastEntry.timestamp
+			const minPointIntervalSec = config.tracking.minPointIntervalSec
+			const minPointDistanceMeters = config.tracking.minPointDistanceMeters
+
+			// Drop dense points to keep DB/query load stable under live-geo floods.
+			if (
+				timeDiff >= 0 &&
+				timeDiff < minPointIntervalSec &&
+				distance < minPointDistanceMeters
+			) {
+				return null
+			}
 
 			if (
 				timeDiff > config.thresholds.maxTime ||

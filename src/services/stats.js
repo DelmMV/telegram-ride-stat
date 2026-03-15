@@ -8,6 +8,7 @@ class StatsService {
 			week: { data: null, timestamp: 0 },
 			month: { data: null, timestamp: 0 },
 		}
+		this.userStatsCache = new Map()
 	}
 
 	getTimestampRangeForPeriod(period) {
@@ -47,21 +48,39 @@ class StatsService {
 	}
 
 	async calculateStats(userId, startTimestamp, endTimestamp) {
+		const cacheKey = `${userId}:${startTimestamp}:${endTimestamp}`
+		const cached = this.userStatsCache.get(cacheKey)
+		if (
+			cached &&
+			Date.now() - cached.timestamp < config.stats.userStatsCacheTtlMs
+		) {
+			return cached.data
+		}
+
 		const locations = await db.getLocationsInTimeRange(
 			userId,
 			startTimestamp,
-			endTimestamp
+			endTimestamp,
+			{
+				projection: { latitude: 1, longitude: 1, sessionId: 1, timestamp: 1 },
+				maxTimeMS: 20000,
+			}
 		)
-		if (locations.length < 2) return null
+		if (locations.length < 2) {
+			this.userStatsCache.set(cacheKey, { data: null, timestamp: Date.now() })
+			return null
+		}
 
 		const totalDistance = locationService.calculateDistance(locations)
 		const sessions = new Set(locations.map(loc => loc.sessionId)).size
 
-		return {
+		const result = {
 			totalDistance,
 			sessions,
 			points: locations.length,
 		}
+		this.userStatsCache.set(cacheKey, { data: result, timestamp: Date.now() })
+		return result
 	}
 
 	async getTopUsers(period, limit = 10) {

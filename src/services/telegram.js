@@ -414,11 +414,6 @@ class TelegramService {
 				},
 				{
 					retries: 3,
-					onFailedAttempt: error => {
-						console.warn(
-							`Попытка ${error.attemptNumber} получения фото профиля не удалась. Осталось попыток: ${error.retriesLeft}`
-						)
-					},
 					factor: 2,
 					minTimeout: 1000,
 					maxTimeout: 10000,
@@ -453,11 +448,6 @@ class TelegramService {
 					},
 					{
 						retries: 3,
-						onFailedAttempt: error => {
-							console.warn(
-								`Попытка ${error.attemptNumber} получения файла не удалась. Осталось попыток: ${error.retriesLeft}`
-							)
-						},
 						factor: 2,
 						minTimeout: 1000,
 						maxTimeout: 10000,
@@ -1439,11 +1429,14 @@ class TelegramService {
 						console.error('Ошибка при сохранении локации:', dbErr)
 					}
 					const processEnd = Date.now()
-					console.log(
-						`[edited_message] userId=${userId} обработан за ${
-							processEnd - startTime
-						} мс (processLocation: ${processEnd - processStart} мс)`
-					)
+					const totalMs = processEnd - startTime
+					if (totalMs >= 1500) {
+						console.log(
+							`[edited_message_slow] userId=${userId} processed=${totalMs}ms processLocation=${
+								processEnd - processStart
+							}ms`
+						)
+					}
 				} catch (err) {
 					console.error('Ошибка в обработчике edited_message:', err)
 				}
@@ -1525,6 +1518,11 @@ class TelegramService {
 	}
 
 	start() {
+		if (!config.bot.token) {
+			throw new Error(
+				'TELEGRAM_BOT_TOKEN is empty. Check .env loading and PM2 cwd/env configuration.'
+			)
+		}
 		// Глобальный обработчик необработанных ошибок
 		process.on('unhandledRejection', error => {
 			console.error('Unhandled promise rejection:', error)
@@ -1554,11 +1552,18 @@ class TelegramService {
 				}),
 			config.cleanup.cleanupSweepIntervalMs
 		)
-		this.bot.launch({
-			dropPendingUpdates: config.bot.dropPendingUpdates,
-			allowedUpdates: config.bot.allowedUpdates,
-		})
-		console.log('Bot started')
+		this.bot
+			.launch({
+				dropPendingUpdates: config.bot.dropPendingUpdates,
+				allowedUpdates: config.bot.allowedUpdates,
+			})
+			.then(() => {
+				console.log('Bot started')
+			})
+			.catch(error => {
+				console.error('Bot launch failed:', error)
+				process.exit(1)
+			})
 	}
 }
 

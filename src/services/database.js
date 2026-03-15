@@ -137,16 +137,27 @@ class DatabaseService {
 		}
 	}
 
-	async getLocationsInTimeRange(userId, startTimestamp, endTimestamp) {
+	async getLocationsInTimeRange(
+		userId,
+		startTimestamp,
+		endTimestamp,
+		{ projection = null, maxTimeMS = 0 } = {}
+	) {
 		try {
 			const collection = this.db.collection('locations')
-			const locations = await collection
-				.find({
-					userId,
-					timestamp: { $gte: startTimestamp, $lte: endTimestamp },
-				})
+			let cursor = collection
+				.find(
+					{
+						userId,
+						timestamp: { $gte: startTimestamp, $lte: endTimestamp },
+					},
+					projection ? { projection } : undefined
+				)
 				.sort({ timestamp: 1 })
-				.toArray()
+			if (maxTimeMS > 0) {
+				cursor = cursor.maxTimeMS(maxTimeMS)
+			}
+			const locations = await cursor.toArray()
 			return locations
 		} catch (error) {
 			console.error('Error getting locations in time range:', error)

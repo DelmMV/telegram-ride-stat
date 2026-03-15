@@ -50,4 +50,11 @@ module.exports = {
 		week: 'week',
 		month: 'month',
 	},
+	tracking: {
+		minPointIntervalSec: Number(process.env.MIN_POINT_INTERVAL_SEC) || 5,
+		minPointDistanceMeters: Number(process.env.MIN_POINT_DISTANCE_METERS) || 15,
+	},
+	stats: {
+		userStatsCacheTtlMs: Number(process.env.USER_STATS_CACHE_TTL_MS) || 60000,
+	},
 }
