@@ -235,7 +235,6 @@ class TelegramService {
 		if (!entry.messagesToDelete.some(msg => msg === message.messageId)) {
 			entry.messagesToDelete.push(message.messageId)
 		}
-		entry.lastUpdate = Date.now()
 		entry.status = CLEANUP_STATUS.PENDING
 		entry.expiresAt = null
 		entry.lastError = null
