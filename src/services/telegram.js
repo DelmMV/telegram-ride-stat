@@ -935,9 +935,6 @@ class TelegramService {
 				}
 			}
 
-			// Store moderation message ID for later reference
-			ctx.session.moderationMessageId = ctx.callbackQuery.message.message_id
-
 			// Извлекаем userId создателя анонса из метаданных в тексте сообщения
 			let creatorId = null
 			const creatorIdMatch = fullModerationText.match(
