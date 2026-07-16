@@ -1,5 +1,8 @@
 const config = require('../config/constants')
 
+const COMMUNITY_NOTICE =
+	'• Катка только для участников сообщества «МоноПитер».'
+
 class AnnouncementService {
 	constructor() {
 		this.template = `01.01.2026 #катка
@@ -112,7 +115,8 @@ class AnnouncementService {
 			`🛣 Едем по: ${roadTypes}\n` +
 			`🚀 Скорость: ${speedDisplay} км/ч\n` +
 			`📝 ${announcement.description}\n\n` +
-			`👥 Организаторы: ${organizers}`
+			`👥 Организаторы: ${organizers}\n\n` +
+			COMMUNITY_NOTICE
 		)
 	}
 
